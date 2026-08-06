@@ -1,0 +1,17 @@
+[package]
+name = "rust-gpu-inference-gateway"
+version = "0.1.0"
+edition = "2021"
+authors = ["jacklee-x"]
+description = "A Rust-based inference gateway with a C++/CUDA GPU inference core."
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tower = "0.4"
+uuid = { version = "1", features = ["v4"] }

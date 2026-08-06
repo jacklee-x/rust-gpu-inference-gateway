@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  gateway:
+    build: ..
+    ports:
+      - "8080:8080"
+    depends_on:
+      - inference_core
+
+  inference_core:
+    image: alpine
+    command: ["echo", "TODO: build inference core"]
