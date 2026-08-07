@@ -65,7 +65,19 @@ cargo run --release
 curl http://127.0.0.1:8080/health
 ```
 
-5. Send a test inference request with Python:
+5. Verify the inference endpoint in PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8080/infer -Method Post -ContentType "application/json" -Body '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+Alternatively, use `curl.exe` in PowerShell:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" -d '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+6. Send a test inference request with Python:
 
 ```bash
 pip install -r python/requirements.txt

@@ -34,12 +34,26 @@ Expected output:
 
 ## 3. Verify the inference endpoint
 
-Send a sample request:
+Send a sample request.
+
+### macOS / Linux / Git Bash / WSL
 
 ```bash
 curl -X POST http://127.0.0.1:8080/infer \
   -H "Content-Type: application/json" \
   -d '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+### PowerShell
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8080/infer -Method Post -ContentType "application/json" -Body '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+### Windows cmd / PowerShell using curl.exe
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" -d '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
 ```
 
 Expected result contains fields like `request_id`, `model`, `output`, `usage`, and `status`.
