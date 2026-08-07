@@ -60,16 +60,38 @@ Expected result contains fields like `request_id`, `model`, `output`, `usage`, a
 
 ## 4. Run the Python demo client
 
-Install dependencies:
+Install dependencies.
 
-```bash
-pip install -r python/requirements.txt
+### PowerShell / Windows
+
+```powershell
+py -m pip install -r python/requirements.txt
 ```
 
-Run the demo client:
+### macOS / Linux
 
 ```bash
-python python/demo/client.py --model llama-7b --input "Hello world"
+python3 -m pip install -r python/requirements.txt
+```
+
+Run the demo client from the repository root.
+
+### PowerShell / Windows
+
+```powershell
+py .\python\demo\client.py --model llama-7b --input "Hello world"
+```
+
+If `py` is not available, use:
+
+```powershell
+python .\python\demo\client.py --model llama-7b --input "Hello world"
+```
+
+### macOS / Linux
+
+```bash
+python3 python/demo/client.py --model llama-7b --input "Hello world"
 ```
 
 This script sends a request to the Rust gateway and prints the returned JSON.
