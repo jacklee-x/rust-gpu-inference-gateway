@@ -80,16 +80,19 @@ curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json"
 6. Send a test inference request with Python:
 
 ```powershell
+# If the py launcher exists
 py -m pip install -r python/requirements.txt
 py .\python\demo\client.py --input "Hello from demo"
 ```
 
-If `py` is not installed, try:
+If `py` is not available, use the Python executable directly:
 
 ```powershell
 python -m pip install -r python/requirements.txt
 python .\python\demo\client.py --input "Hello from demo"
 ```
+
+If neither `py` nor `python` work, install Python from https://www.python.org/downloads/ and make sure it is added to PATH.
 
 6. Measure latency with the benchmark script:
 

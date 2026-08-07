@@ -64,25 +64,31 @@ Install dependencies.
 
 ### PowerShell / Windows
 
+If `py` exists on your machine, use:
+
 ```powershell
 py -m pip install -r python/requirements.txt
 ```
 
-### macOS / Linux
+If `py` does not exist, use the Python executable directly:
 
-```bash
-python3 -m pip install -r python/requirements.txt
+```powershell
+python -m pip install -r python/requirements.txt
 ```
+
+If `python` also does not exist, install Python from https://www.python.org/downloads/ or enable it from the Microsoft Store.
 
 Run the demo client from the repository root.
 
 ### PowerShell / Windows
 
+If `py` exists:
+
 ```powershell
 py .\python\demo\client.py --model llama-7b --input "Hello world"
 ```
 
-If `py` is not available, use:
+If `python` exists:
 
 ```powershell
 python .\python\demo\client.py --model llama-7b --input "Hello world"
