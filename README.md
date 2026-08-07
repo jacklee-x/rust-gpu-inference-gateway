@@ -53,9 +53,53 @@ cd rust-gpu-inference-gateway
 cargo build --release
 ```
 
-3. Build the C++ inference core (future implementation)
+3. Run the Rust gateway:
 
-4. Start the service and run the Python demo client
+```bash
+cargo run --release
+```
+
+4. Verify the health endpoint:
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+5. Verify the inference endpoint in PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8080/infer -Method Post -ContentType "application/json" -Body '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+Alternatively, use `curl.exe` in PowerShell:
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" -d '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
+```
+
+6. Send a test inference request with Python:
+
+```powershell
+py -m pip install -r python/requirements.txt
+py .\python\demo\client.py --input "Hello from demo"
+```
+
+If `py` is not installed, try:
+
+```powershell
+python -m pip install -r python/requirements.txt
+python .\python\demo\client.py --input "Hello from demo"
+```
+
+6. Measure latency with the benchmark script:
+
+```bash
+python python/benchmark/benchmark.py
+```
+
+7. Note: the `cpp_inference` directory currently contains the planned inference core. The current Rust service returns a stub response for testing the request path.
+
+For more detailed instructions, see `docs/run.md`.
 
 ## Project Structure
 
