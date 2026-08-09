@@ -58,6 +58,8 @@ curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json"
 
 Expected result contains fields like `request_id`, `model`, `output`, `usage`, and `status`.
 
+> Note: this version uses a simple concurrency limiter. If the service is busy, you may receive a `503` response with `{"status":"queue_full"}`.
+
 ## 4. Run the Python demo client
 
 Install dependencies.

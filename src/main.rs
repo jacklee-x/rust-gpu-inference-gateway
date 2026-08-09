@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::{net::TcpListener, sync::Semaphore, time::{timeout, Duration}};
 use tracing_subscriber::EnvFilter;
 
+// Request payload for the /infer endpoint.
 #[derive(Deserialize, Clone)]
 pub struct InferRequest {
     pub model: String,
@@ -12,6 +13,7 @@ pub struct InferRequest {
     pub options: Option<InferOptions>,
 }
 
+// Optional inference parameters.
 #[derive(Deserialize, Clone)]
 pub struct InferOptions {
     pub max_tokens: Option<u32>,
@@ -19,6 +21,7 @@ pub struct InferOptions {
     pub top_p: Option<f32>,
 }
 
+// Response payload returned by the inference endpoint.
 #[derive(Serialize, Clone)]
 pub struct InferResponse {
     pub request_id: String,
@@ -37,6 +40,7 @@ pub struct Usage {
 #[derive(Clone)]
 struct AppState {
     // limit concurrent inferences (acts like a worker pool size)
+    // Each permit represents one active inference slot.
     concurrency_limit: Arc<Semaphore>,
     // request timeout seconds
     request_timeout_secs: u64,
@@ -79,18 +83,21 @@ async fn metrics_handler() -> impl IntoResponse {
 }
 
 async fn infer_handler(Extension(state): Extension<Arc<AppState>>, Json(payload): Json<InferRequest>) -> impl IntoResponse {
-    // Try to acquire a permit immediately to limit concurrency
+    // Try to acquire a permit immediately to limit concurrency.
+    // If the semaphore is empty, the gateway is busy and we return 503.
     match state.concurrency_limit.clone().try_acquire_owned() {
         Ok(permit) => {
-            // We got a permit — run the inference with timeout
+            // We got a permit — this request is allowed to execute.
             let timeout_dur = Duration::from_secs(state.request_timeout_secs);
             let fut = call_inference_stub(payload.clone());
+
             match timeout(timeout_dur, fut).await {
                 Ok(Ok(infer_resp)) => {
-                    // permit drops here when goes out of scope
+                    // permit drops here when it goes out of scope
                     drop(permit);
-                    // unify response type as JSON Value
-                    let v = serde_json::to_value(infer_resp).unwrap_or(serde_json::json!({"status":"ok","output":"serialization_error"}));
+                    // Convert the response to a generic JSON value so all branches share the same type.
+                    let v = serde_json::to_value(infer_resp)
+                        .unwrap_or(serde_json::json!({"status":"ok","output":"serialization_error"}));
                     (StatusCode::OK, Json(v))
                 }
                 Ok(Err(e)) => {
@@ -98,20 +105,21 @@ async fn infer_handler(Extension(state): Extension<Arc<AppState>>, Json(payload)
                     (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"status":"error","message": e})))
                 }
                 Err(_) => {
-                    // timeout
+                    // timeout happened before the inference finished
                     drop(permit);
                     (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({"status":"timeout"})))
                 }
             }
         }
         Err(_) => {
-            // no permits available -> return 503 to apply backpressure
+            // no permits available -> immediately tell the client the service is busy
             (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"status":"queue_full"})))
         }
     }
 }
 
-// Minimal async stub for inference call — replace with RPC/FFI to C++ core later
+// Minimal async stub for inference call — replace with RPC/FFI to C++ core later.
+// This function simulates a short processing delay, then returns a fake inference result.
 async fn call_inference_stub(req: InferRequest) -> Result<InferResponse, String> {
     // simulate some processing delay
     let sleep_ms = 50u64;
