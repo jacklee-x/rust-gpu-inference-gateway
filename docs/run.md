@@ -20,6 +20,13 @@ cd cpp_inference
 ./run_core.sh
 ```
 
+or use the helper script to start both services (recommended):
+
+```bash
+# from project root: ./scripts/start-dev.sh [CORE_PORT] [GATEWAY_PORT]
+./scripts/start-dev.sh 8081 8080
+```
+
 This C++ core listens on `127.0.0.1:8081` and exposes `/health` and `/infer` for the Rust gateway.
 
 ## 2. Start the Rust gateway

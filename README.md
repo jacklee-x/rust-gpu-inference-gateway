@@ -61,13 +61,20 @@ cd cpp_inference
 ./run_core.sh
 ```
 
-4. Build the Rust gateway:
+or use the helper script (recommended) to start both services:
+
+```bash
+# from project root: ./scripts/start-dev.sh [CORE_PORT] [GATEWAY_PORT]
+./scripts/start-dev.sh 8081 8080
+```
+
+4. Build the Rust gateway (if not using start-dev.sh which builds automatically):
 
 ```bash
 cargo build --release
 ```
 
-5. Run the Rust gateway in another terminal:
+5. Run the Rust gateway in another terminal (if not using start-dev.sh):
 
 ```bash
 cargo run --release
