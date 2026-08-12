@@ -8,17 +8,19 @@ This page explains how to run the current first-version project and verify its b
 - Python 3.10+ installed
 - `pip` available
 
-## 1. Start the mock inference core
+## 1. Build and start the C++ inference core
 
-The current version uses a local mock inference core to demonstrate the RPC scheduling path before the real C++ GPU core is implemented.
+The current version uses a real C++ inference service on `127.0.0.1:8081` instead of the earlier Python mock server.
 
 From the project root, open one terminal and run:
 
 ```bash
-python .\cpp_inference\mock_server.py
+cd cpp_inference
+./build.sh
+./run_core.sh
 ```
 
-This mock service listens on `127.0.0.1:8081` and accepts the same `/infer` payload as the Rust gateway.
+This C++ core listens on `127.0.0.1:8081` and exposes `/health` and `/infer` for the Rust gateway.
 
 ## 2. Start the Rust gateway
 
@@ -44,7 +46,7 @@ Expected output:
 {"status":"healthy"}
 ```
 
-## 3. Verify the inference endpoint
+## 4. Verify the inference endpoint
 
 Send a sample request.
 
@@ -70,7 +72,7 @@ curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json"
 
 Expected result contains fields like `request_id`, `model`, `output`, `usage`, and `status`.
 
-> Note: this version uses a queued worker pool. The Rust gateway accepts requests into a bounded queue and dispatches them to worker tasks that call the mock inference core. If the queue is full, you may receive a `503` response with `{"status":"queue_full"}`.
+> Note: this version uses a queued worker pool. The Rust gateway accepts requests into a bounded queue and dispatches them to worker tasks that call the C++ inference core on port `8081`. If the queue is full, you may receive a `503` response with `{"status":"queue_full"}`.
 
 ## 4. Run the Python demo client
 
@@ -126,26 +128,24 @@ python python/benchmark/benchmark.py
 
 It sends 10 requests to the gateway and prints per-request latency and average latency.
 
-## 6. What this first version does
+## 6. What this version does
 
-At present, the Rust gateway is a working HTTP service. It supports:
+At present, the system is a working end-to-end proof of concept. It supports:
 
-- `GET /health`
-- `GET /metrics` (placeholder text)
-- `POST /infer`
+- a Rust HTTP gateway on `127.0.0.1:8080`
+- a C++ inference service on `127.0.0.1:8081`
+- `GET /health` on both layers
+- `POST /infer` through the Rust gateway to the C++ core
+- worker-pool request scheduling and timeouts in the Rust layer
 
-The `POST /infer` endpoint currently returns a stub response. It does not yet perform real GPU inference.
+The C++ core is not yet a production LLM runtime, but it is a real C++ service with an optional CUDA-ready execution path and a CPU fallback.
 
-## 7. What is not implemented yet
+## 7. Next steps
 
-The following pieces are planned but not yet implemented:
+The parts still planned for later versions are:
 
-- real C++ GPU inference core
-- worker pool with real scheduling
-- GPU model loading and execution
+- GPU model loading and execution with a true CUDA kernel
+- ONNX Runtime / TensorRT integration
 - Prometheus-formatted metrics
-- `GET /models` endpoint
-
-## 8. Next step
-
-After you verify the current service works, the next development step is to implement the `cpp_inference` core and connect it to the Rust worker.
+- `GET /models` endpoint and model registry support
+- container orchestration and production deployment examples
