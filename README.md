@@ -53,19 +53,25 @@ cd rust-gpu-inference-gateway
 cargo build --release
 ```
 
-3. Run the Rust gateway:
+3. Start the mock inference core in one terminal:
+
+```bash
+python .\cpp_inference\mock_server.py
+```
+
+4. Run the Rust gateway in another terminal:
 
 ```bash
 cargo run --release
 ```
 
-4. Verify the health endpoint:
+5. Verify the health endpoint:
 
 ```bash
 curl http://127.0.0.1:8080/health
 ```
 
-5. Verify the inference endpoint in PowerShell:
+6. Verify the inference endpoint in PowerShell:
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:8080/infer -Method Post -ContentType "application/json" -Body '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
@@ -76,6 +82,8 @@ Alternatively, use `curl.exe` in PowerShell:
 ```powershell
 curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" -d '{"model":"llama-7b","input":"Hello world","options":{"max_tokens":32}}'
 ```
+
+This version uses a queued worker pool and a local mock inference core. If the queue is full, the gateway returns `503` with `{"status":"queue_full"}`.
 
 6. Send a test inference request with Python:
 

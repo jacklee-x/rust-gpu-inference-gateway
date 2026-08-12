@@ -1,12 +1,24 @@
-use axum::{extract::Json, http::StatusCode, response::IntoResponse, routing::{get, post}, Router, Extension};
+use axum::{
+    extract::Json,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Extension, Router,
+};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::{net::TcpListener, sync::Semaphore, time::{timeout, Duration}};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, oneshot, Semaphore},
+    time::{timeout, Duration},
+};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 // Request payload for the /infer endpoint.
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct InferRequest {
     pub model: String,
     pub input: String,
@@ -14,7 +26,7 @@ pub struct InferRequest {
 }
 
 // Optional inference parameters.
-#[derive(Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct InferOptions {
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
@@ -22,7 +34,7 @@ pub struct InferOptions {
 }
 
 // Response payload returned by the inference endpoint.
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct InferResponse {
     pub request_id: String,
     pub model: String,
@@ -31,18 +43,24 @@ pub struct InferResponse {
     pub status: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Usage {
     pub latency_ms: u128,
     pub tokens: u32,
 }
 
+type JobResult = Result<InferResponse, String>;
+
+type ResponseSender = oneshot::Sender<JobResult>;
+
+struct Job {
+    request: InferRequest,
+    response_tx: ResponseSender,
+}
+
 #[derive(Clone)]
 struct AppState {
-    // limit concurrent inferences (acts like a worker pool size)
-    // Each permit represents one active inference slot.
-    concurrency_limit: Arc<Semaphore>,
-    // request timeout seconds
+    job_sender: mpsc::Sender<Job>,
     request_timeout_secs: u64,
 }
 
@@ -52,12 +70,20 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    // configuration (simple for MVP)
-    let max_concurrency = 4usize; // adjust as needed
+    let max_concurrency = 4usize;
+    let queue_capacity = 100usize;
     let request_timeout_secs = 10u64;
 
+    let (job_sender, job_receiver) = mpsc::channel::<Job>(queue_capacity);
+    let inference_core_client = Client::new();
+    tokio::spawn(dispatcher_loop(
+        job_receiver,
+        max_concurrency,
+        inference_core_client,
+    ));
+
     let state = AppState {
-        concurrency_limit: Arc::new(Semaphore::new(max_concurrency)),
+        job_sender,
         request_timeout_secs,
     };
 
@@ -68,13 +94,37 @@ async fn main() {
         .layer(Extension(Arc::new(state)));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-    tracing::info!(%addr, "starting inference gateway");
+    info!(%addr, "starting inference gateway");
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
+async fn dispatcher_loop(
+    mut job_receiver: mpsc::Receiver<Job>,
+    worker_count: usize,
+    client: Client,
+) {
+    let semaphore = Arc::new(Semaphore::new(worker_count));
+    while let Some(job) = job_receiver.recv().await {
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let client = client.clone();
+
+        tokio::spawn(async move {
+            debug!(request_model = %job.request.model, "dispatching inference job to worker");
+            let result = call_inference_core(&client, job.request).await;
+            if job.response_tx.send(result).is_err() {
+                error!("client response channel dropped before worker completed");
+            }
+            drop(permit);
+        });
+    }
+}
+
 async fn health_handler() -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({"status": "healthy"})))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"status": "healthy"})),
+    )
 }
 
 async fn metrics_handler() -> impl IntoResponse {
@@ -82,55 +132,65 @@ async fn metrics_handler() -> impl IntoResponse {
     (StatusCode::OK, "# metrics will be added later\n")
 }
 
-async fn infer_handler(Extension(state): Extension<Arc<AppState>>, Json(payload): Json<InferRequest>) -> impl IntoResponse {
-    // Try to acquire a permit immediately to limit concurrency.
-    // If the semaphore is empty, the gateway is busy and we return 503.
-    match state.concurrency_limit.clone().try_acquire_owned() {
-        Ok(permit) => {
-            // We got a permit — this request is allowed to execute.
-            let timeout_dur = Duration::from_secs(state.request_timeout_secs);
-            let fut = call_inference_stub(payload.clone());
+async fn infer_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(payload): Json<InferRequest>,
+) -> impl IntoResponse {
+    let (response_tx, response_rx) = oneshot::channel();
+    let job = Job {
+        request: payload.clone(),
+        response_tx,
+    };
 
-            match timeout(timeout_dur, fut).await {
-                Ok(Ok(infer_resp)) => {
-                    // permit drops here when it goes out of scope
-                    drop(permit);
-                    // Convert the response to a generic JSON value so all branches share the same type.
-                    let v = serde_json::to_value(infer_resp)
-                        .unwrap_or(serde_json::json!({"status":"ok","output":"serialization_error"}));
-                    (StatusCode::OK, Json(v))
-                }
-                Ok(Err(e)) => {
-                    drop(permit);
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"status":"error","message": e})))
-                }
-                Err(_) => {
-                    // timeout happened before the inference finished
-                    drop(permit);
-                    (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({"status":"timeout"})))
-                }
-            }
+    if let Err(_) = state.job_sender.try_send(job) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "queue_full"})),
+        );
+    }
+
+    let timeout_dur = Duration::from_secs(state.request_timeout_secs);
+    match timeout(timeout_dur, response_rx).await {
+        Ok(Ok(Ok(infer_resp))) => {
+            let v = serde_json::to_value(infer_resp)
+                .unwrap_or(serde_json::json!({"status":"ok","output":"serialization_error"}));
+            (StatusCode::OK, Json(v))
         }
-        Err(_) => {
-            // no permits available -> immediately tell the client the service is busy
-            (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"status":"queue_full"})))
-        }
+        Ok(Ok(Err(err_msg))) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"status":"error","message": err_msg})),
+        ),
+        Ok(Err(_)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"status":"error","message": "worker task cancelled"})),
+        ),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(serde_json::json!({"status":"timeout"})),
+        ),
     }
 }
 
-// Minimal async stub for inference call — replace with RPC/FFI to C++ core later.
-// This function simulates a short processing delay, then returns a fake inference result.
-async fn call_inference_stub(req: InferRequest) -> Result<InferResponse, String> {
-    // simulate some processing delay
-    let sleep_ms = 50u64;
-    tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+async fn call_inference_core(client: &Client, req: InferRequest) -> JobResult {
+    let core_url = "http://127.0.0.1:8081/infer";
+    let response = client
+        .post(core_url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|err| format!("rpc error: {}", err))?;
 
-    let resp = InferResponse {
-        request_id: uuid::Uuid::new_v4().to_string(),
-        model: req.model,
-        output: format!("inferred (stub): {}", req.input),
-        usage: Usage { latency_ms: sleep_ms as u128, tokens: req.options.and_then(|o| o.max_tokens).unwrap_or(0) },
-        status: "ok".to_string(),
-    };
-    Ok(resp)
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "no body".to_string());
+        return Err(format!("core returned {}: {}", status, text));
+    }
+
+    response
+        .json::<InferResponse>()
+        .await
+        .map_err(|err| format!("failed to decode core response: {}", err))
 }

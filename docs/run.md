@@ -8,17 +8,29 @@ This page explains how to run the current first-version project and verify its b
 - Python 3.10+ installed
 - `pip` available
 
-## 1. Start the Rust gateway
+## 1. Start the mock inference core
 
-From the project root:
+The current version uses a local mock inference core to demonstrate the RPC scheduling path before the real C++ GPU core is implemented.
+
+From the project root, open one terminal and run:
+
+```bash
+python .\cpp_inference\mock_server.py
+```
+
+This mock service listens on `127.0.0.1:8081` and accepts the same `/infer` payload as the Rust gateway.
+
+## 2. Start the Rust gateway
+
+Open another terminal and run from the project root:
 
 ```bash
 cargo run --release
 ```
 
-The service listens on `127.0.0.1:8080`.
+The gateway listens on `127.0.0.1:8080`.
 
-## 2. Verify the health endpoint
+## 3. Verify the health endpoint
 
 Open another terminal and run:
 
@@ -58,7 +70,7 @@ curl.exe -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json"
 
 Expected result contains fields like `request_id`, `model`, `output`, `usage`, and `status`.
 
-> Note: this version uses a simple concurrency limiter. If the service is busy, you may receive a `503` response with `{"status":"queue_full"}`.
+> Note: this version uses a queued worker pool. The Rust gateway accepts requests into a bounded queue and dispatches them to worker tasks that call the mock inference core. If the queue is full, you may receive a `503` response with `{"status":"queue_full"}`.
 
 ## 4. Run the Python demo client
 
