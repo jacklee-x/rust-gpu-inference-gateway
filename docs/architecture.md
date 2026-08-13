@@ -45,13 +45,16 @@ Each worker is responsible for:
 
 ### C++ GPU Inference Core
 
-The C++ component is responsible for actual model execution on GPU. It can be implemented in one of the following ways:
+The C++ component is responsible for model execution and currently exposes a local HTTP endpoint for the Rust gateway.
 
-- `llama.cpp` / `ggml` for a fast proof-of-concept
-- ONNX Runtime for model inference
-- TensorRT for optimized GPU execution
+The implementation is designed to support both:
 
-The core should expose a minimal interface for the Rust worker to load models, execute inference, and return outputs.
+- a real CUDA execution path when the project is compiled with CUDA support
+- a CPU fallback path that keeps the service runnable without a GPU in development environments
+
+This workflow keeps the project practical for local verification while remaining open to a future migration toward `llama.cpp`, ONNX Runtime, TensorRT, or a custom CUDA inference kernel.
+
+The core exposes a minimal interface for the Rust worker to load models, execute inference, and return outputs over a simple JSON API.
 
 ### Python Tooling
 

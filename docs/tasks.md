@@ -20,13 +20,11 @@
 - Support request timeout and error handling
 - Make the worker interface pluggable for the inference core
 
-### Task 4: C++ inference core stub
+### Task 4: C++ inference core
 - Create C++ project scaffolding in `cpp_inference/`
-- Implement a minimal inference stub that returns a fixed response
-- Integrate Rust with the C++ stub via one of:
-  - subprocess HTTP/gRPC call
-  - FFI using `cxx`
-  - simple process-level IPC
+- Implement an HTTP-based C++ core that exposes `/health` and `/infer`
+- Add a CUDA-enabled execution branch and a CPU fallback for local development
+- Integrate Rust with the C++ service via a simple HTTP RPC boundary
 - Verify end-to-end Rust -> C++ -> Rust flow
 
 ### Task 5: Python demo and benchmark
