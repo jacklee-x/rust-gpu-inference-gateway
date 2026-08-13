@@ -1,3 +1,26 @@
+/*
+ * inference_core.cpp
+ * ------------------
+ * Lightweight C++ inference core used by the rust-gpu-inference-gateway
+ * project. This file implements a minimal HTTP server with two endpoints:
+ *   GET  /health  -> returns simple health JSON
+ *   POST /infer   -> accepts a JSON payload and returns a JSON result
+ *
+ * Design goals for this prototype:
+ * - Keep dependencies minimal (plain sockets) so the example is easy to
+ *   compile on Windows, Linux and macOS without heavy runtime deps.
+ * - Provide a clear CUDA integration point: when compiled with nvcc
+ *   (``__CUDACC__`` defined), `run_cuda_inference` will attempt to run
+ *   a CUDA kernel. When CUDA is unavailable the code falls back to a
+ *   CPU-only implementation (`run_cpu_inference`).
+ * - Demonstrate a stable JSON wire format compatible with the Rust
+ *   gateway (InferRequest / InferResponse).
+ *
+ * NOTE: This is a demo/prototype. The JSON parsing here is intentionally
+ * minimal and not robust for production workloads. Replace with a real
+ * JSON library (e.g., nlohmann/json or rapidjson) for real projects.
+ */
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -135,22 +158,32 @@ struct InferenceRequest {
     float top_p = 0.95f;
 };
 
+// parse_request_body: minimal JSON extraction to populate an
+// InferenceRequest. This function demonstrates a lightweight approach
+// that parses a few known fields without pulling in a full JSON library.
+// Production code should validate inputs thoroughly and use a robust
+// JSON parser. The function returns a request populated with reasonable
+// defaults when fields are missing.
 InferenceRequest parse_request_body(const std::string& body) {
     InferenceRequest request;
+    // model field (default to "llama-7b" when absent)
     request.model = find_json_string_value(body, "model");
     if (request.model.empty()) {
         request.model = "llama-7b";
     }
 
+    // input field (default to "hello world" when absent)
     request.input = find_json_string_value(body, "input");
     if (request.input.empty()) {
         request.input = "hello world";
     }
 
+    // simple numeric fields: attempt to parse top-level keys
     request.max_tokens = find_json_int_value(body, "max_tokens", 32);
     request.temperature = find_json_float_value(body, "temperature", 0.8f);
     request.top_p = find_json_float_value(body, "top_p", 0.95f);
 
+    // sanitize/normalize values to safe defaults
     if (request.max_tokens <= 0) {
         request.max_tokens = 32;
     }
@@ -161,6 +194,10 @@ InferenceRequest parse_request_body(const std::string& body) {
         request.top_p = 0.95f;
     }
 
+    // Some clients encode options as a nested object. This helper looks
+    // inside an "options" object for a string value named "max_tokens"
+    // and uses it if present. This is a convenience to support multiple
+    // possible payload shapes in the demo.
     const std::string nested = extract_value_from_nested_options(body, "max_tokens");
     if (!nested.empty()) {
         request.max_tokens = std::stoi(nested);
@@ -176,8 +213,14 @@ std::string make_request_id() {
     return oss.str();
 }
 
+// run_cpu_inference: a deterministic, cheap CPU-based transformation
+// used as a fallback when no GPU/CUDA path is available. In this demo
+// it simply uppercases the input and returns a descriptive string.
+// Replace this with real model execution logic when integrating a real
+// inference runtime (onnxruntime, llama.cpp, TensorRT, etc.).
 std::string run_cpu_inference(const InferenceRequest& request) {
     std::string text = request.input;
+    // naive normalization: uppercase the input
     std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
         return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     });
@@ -193,10 +236,19 @@ std::string run_cpu_inference(const InferenceRequest& request) {
 }
 
 #if defined(__CUDACC__)
+// run_cuda_inference: placeholder CUDA path. When compiled with nvcc
+// this code will try to allocate a device buffer, copy the input, run
+// a tiny CUDA kernel and copy a result back. The kernel here is a toy
+// example that increments each byte by 1 — it is NOT a model.
+//
+// Real integration should replace this function with calls into a
+// proper GPU runtime (TensorRT, custom CUDA kernels, or ONNX Runtime
+// CUDA provider) and include proper error checking and memory handling.
 std::string run_cuda_inference(const InferenceRequest& request) {
     int device_count = 0;
     cudaGetDeviceCount(&device_count);
     if (device_count <= 0) {
+        // No CUDA devices found — fall back to CPU implementation
         return run_cpu_inference(request);
     }
 
@@ -210,6 +262,7 @@ std::string run_cuda_inference(const InferenceRequest& request) {
 
     int block_size = 256;
     int grid_size = (static_cast<int>(bytes.size()) + block_size - 1) / block_size;
+    // Launch a trivial kernel — replace with real model invocation in future
     cuda_kernel<<<grid_size, block_size>>>(device_buffer, static_cast<int>(bytes.size()));
     cudaDeviceSynchronize();
 
@@ -224,6 +277,9 @@ std::string run_cuda_inference(const InferenceRequest& request) {
     return oss.str();
 }
 
+// Example CUDA kernel: naive byte-wise increment. Present for demonstration
+// only; production kernels will be significantly more complex and probably
+// be implemented as part of a model runtime.
 __global__ void cuda_kernel(char* buffer, int length) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < length) {
@@ -231,6 +287,7 @@ __global__ void cuda_kernel(char* buffer, int length) {
     }
 }
 #else
+// If not compiled with CUDA, make the cuda path call the CPU fallback.
 std::string run_cuda_inference(const InferenceRequest& request) {
     return run_cpu_inference(request);
 }
@@ -275,6 +332,12 @@ bool read_available_data(int socket_fd, std::string& output, size_t expected_byt
     return true;
 }
 
+// read_http_request: read an HTTP request from a connected socket.
+// This helper reads until the request headers are complete (delimiter
+// CRLFCRLF) and then, if a Content-Length header is present, reads the
+// remaining body bytes. The function returns the entire request as a
+// string (headers+body). Note: this is a minimal blocking reader and
+// not suitable for high-performance servers.
 std::string read_http_request(int socket_fd) {
     std::string request;
     char buffer[4096];
@@ -285,17 +348,21 @@ std::string read_http_request(int socket_fd) {
         const ssize_t received = recv(socket_fd, buffer, sizeof(buffer), 0);
 #endif
         if (received <= 0) {
+            // connection closed or error
             return request;
         }
         request.append(buffer, static_cast<size_t>(received));
+        // stop when we've read headers termination
         if (request.find("\r\n\r\n") != std::string::npos) {
             break;
         }
+        // safety cap to avoid unbounded memory usage on malformed input
         if (request.size() > 64 * 1024) {
             break;
         }
     }
 
+    // If Content-Length header exists, ensure we read the full body.
     const std::string header = request.substr(0, request.find("\r\n\r\n"));
     const std::string content_length_header = "Content-Length:";
     const auto position = header.find(content_length_header);
@@ -309,6 +376,7 @@ std::string read_http_request(int socket_fd) {
             const std::string existing_body = request.substr(body_start + 4);
             if (existing_body.size() < content_length) {
                 std::string rest;
+                // read the remaining bytes explicitly
                 if (read_available_data(socket_fd, rest, content_length - existing_body.size())) {
                     request.append(rest);
                 }
@@ -318,6 +386,8 @@ std::string read_http_request(int socket_fd) {
     return request;
 }
 
+// send_response: helper that writes a simple HTTP response consisting
+// of a status line and JSON body. Connection is closed after response.
 void send_response(int client_socket, const std::string& status_line, const std::string& payload) {
     const std::string response =
         status_line + "Content-Type: application/json\r\n"
@@ -330,9 +400,15 @@ void send_response(int client_socket, const std::string& status_line, const std:
 #endif
 }
 
+// handle_client_connection: per-connection handler that reads the
+// incoming HTTP request, performs very small routing for /health and
+// /infer, and writes a JSON response. Each connection is handled on a
+// detached std::thread so the accept loop can remain simple.
 void handle_client_connection(int client_socket) {
+    // Read whole request (headers + body as needed)
     const std::string request = read_http_request(client_socket);
     if (request.empty()) {
+        // Bad or empty request — respond 400
         send_response(client_socket, "HTTP/1.1 400 Bad Request\r\n", build_error_json("empty request", 400));
 #if defined(_WIN32)
         closesocket(client_socket);
@@ -342,6 +418,7 @@ void handle_client_connection(int client_socket) {
         return;
     }
 
+    // Parse the first request line: METHOD PATH VERSION
     const auto request_line_end = request.find("\r\n");
     const std::string request_line = request.substr(0, request_line_end);
     std::istringstream iss(request_line);
@@ -350,6 +427,7 @@ void handle_client_connection(int client_socket) {
     std::string version;
     iss >> method >> path >> version;
 
+    // Health route: quick check for orchestration
     if (method == "GET" && path == "/health") {
         const std::string payload = "{\"status\":\"healthy\",\"engine\":\"c++-cuda-ready\"}";
         send_response(client_socket, "HTTP/1.1 200 OK\r\n", payload);
@@ -361,6 +439,7 @@ void handle_client_connection(int client_socket) {
         return;
     }
 
+    // Inference route: expect JSON body
     if (method == "POST" && path == "/infer") {
         const auto body_start = request.find("\r\n\r\n");
         if (body_start == std::string::npos) {
@@ -373,8 +452,11 @@ void handle_client_connection(int client_socket) {
             return;
         }
 
+        // Extract body and parse into our InferenceRequest struct
         const std::string body = request.substr(body_start + 4);
         const InferenceRequest request_details = parse_request_body(body);
+
+        // Perform inference (CPU or CUDA path) and build the JSON reply
         const std::string payload = build_inference_json(request_details);
         send_response(client_socket, "HTTP/1.1 200 OK\r\n", payload);
 #if defined(_WIN32)
@@ -385,6 +467,7 @@ void handle_client_connection(int client_socket) {
         return;
     }
 
+    // Unknown route
     send_response(client_socket, "HTTP/1.1 404 Not Found\r\n", build_error_json("route not found", 404));
 #if defined(_WIN32)
     closesocket(client_socket);
