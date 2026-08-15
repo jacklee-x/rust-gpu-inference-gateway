@@ -1,7 +1,23 @@
+# Rust build artifacts
 target/
 **/target/
 *.rs.bk
+
+# Lockfiles are ignored for library-style repos; keep for binaries if desired
 Cargo.lock
+
+# OS noise
 .DS_Store
+
+# Python caches
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Local dev runtime state (PID files, logs produced by start/stop-dev scripts)
+.dev/
+*.log
+
+# Downloaded GGUF model weights (large binary files, fetched by build tooling)
+models/
+*.gguf

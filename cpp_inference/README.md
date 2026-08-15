@@ -27,20 +27,22 @@ Important points:
 
 From this directory:
 
-```powershell
-./build.ps1
+```bash
+./build.sh
 ```
 
 or, on Linux/macOS:
 
 ```bash
-g++ -std=c++17 -O2 inference_core.cpp -o inference_core
+g++ -std=c++17 -O2 inference_core.cpp -o inference_core -pthread
 ```
+
+On Windows, use a MinGW or MSVC toolchain; the source uses Winsock2 (`winsock2.h`) and links `ws2_32.lib`.
 
 ## Run
 
-```powershell
-./run_core.ps1
+```bash
+./run_core.sh
 ```
 
 The server binds to `127.0.0.1:8081` and waits for inference requests.
@@ -82,5 +84,6 @@ The next major steps are:
 
 1. replace the CPU fallback with a real CUDA kernel path and model loader
 2. integrate a small ONNX Runtime or TensorRT path for production inference
-3. add request batching and model management
-4. expose Prometheus metrics and model registry endpoints
+3. add request batching and model management (dynamic/loaded model status)</think>
+
+> Note: `GET /metrics` and `GET /models` are served by the Rust gateway; the core provides `GET /health` for orchestration.

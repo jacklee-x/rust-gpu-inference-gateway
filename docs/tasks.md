@@ -9,10 +9,10 @@
 
 ### Task 2: Rust gateway core
 - Build a simple Axum HTTP server
-- Implement `POST /infer`, `GET /health`, and `GET /metrics`
-- Add request validation and JSON serialization
-- Add structured logging with `tracing`
-- Add configuration support
+- Implement `POST /infer`, `GET /health`, `GET /metrics`, and `GET /models`
+- Add request validation (model registry checks, JSON errors) and JSON serialization
+- Add structured logging with `tracing` (per-request `request_id` spans)
+- Add configuration support (env vars: `BIND_ADDR` / `PORT`, `CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`)
 
 ### Task 3: Task queue and worker
 - Implement an asynchronous task queue using `tokio::mpsc`
@@ -34,18 +34,17 @@
 - Add `python/tests/test_end_to_end.py` for basic validation
 
 ### Task 6: Containerization and deployment
-- Add Dockerfile for Rust gateway
-- Add Dockerfile for C++ inference core
-- Add `deploy/docker-compose.yml` for local startup
+- Add Dockerfile for Rust gateway (`deploy/Dockerfile.gateway`)
+- Add Dockerfile for C++ inference core (`cpp_inference/Dockerfile`)
+- Add `deploy/docker-compose.yml` for local startup (healthchecks, dependency wiring)
 - Document startup steps in `README.md`
 
 ## Phase 2: GPU and model support
 
-- Replace the C++ stub with a real GPU inference implementation
-- Add model loading, preparation, and conversion
-- Add a `GET /models` endpoint
-- Add model registry and simple storage abstractions
-- Expand metrics and tracing
+- [ ] Replace the C++ stub with a real GPU inference implementation
+- [x] Add `GET /models` endpoint
+- [x] Add model registry abstraction (`src/models.rs`, in-memory)
+- [x] Expand metrics (Prometheus text format via `src/metrics.rs`) and tracing (request_id spans)
 
 ## Phase 3: Extension and polish
 
