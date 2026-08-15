@@ -23,9 +23,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Resolve the model path relative to the script location so this script
-# works no matter where it is invoked from.
-$ModelPath = Join-Path $PSScriptRoot $Model
+# llama-server (with the CUDA backend) dynamically links against cuBLAS
+# shipped with the CUDA Toolkit. The 64-bit runtime DLLs live in
+# <CUDA>/bin/x64 (CUDA 13 layout), which is not on PATH by default — so
+# prepend it here, otherwise the process exits with STATUS_DLL_NOT_FOUND.
+$cudaBin = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\x64"
+if (Test-Path -LiteralPath $cudaBin) {
+    $env:PATH = "$cudaBin;$env:PATH"
+}
+
+# Resolve the model path. An absolute path is used as-is; a relative
+# path is resolved against the script location so this script works no
+# matter where it is invoked from.
+if ([System.IO.Path]::IsPathRooted($Model)) {
+    $ModelPath = $Model
+} else {
+    $ModelPath = Join-Path $PSScriptRoot $Model
+}
 if (-not (Test-Path -LiteralPath $ModelPath)) {
     Write-Error "Model file not found: $ModelPath"
 }
