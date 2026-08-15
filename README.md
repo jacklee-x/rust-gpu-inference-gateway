@@ -7,6 +7,10 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 - Rust gateway for HTTP/gRPC inference requests
 - Task queue and worker pool for request scheduling
 - C++ inference core for GPU-backed model execution
+- Prometheus-compatible metrics endpoint (`GET /metrics`)
+- Model registry and discovery endpoint (`GET /models`)
+- Traceable per-request `request_id` (UUID) stamped by the gateway
+- Environment-variable based configuration (`CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
 - Python tooling for demo clients, model preparation, and benchmark scripts
 - Production-style engineering features: configuration, logging, health checks, metrics, and Docker support
 
@@ -123,6 +127,14 @@ If neither `py` nor `python` work, install Python from https://www.python.org/do
 python python/benchmark/benchmark.py
 ```
 
+10. Start both services with Docker Compose (CPU fallback path):
+
+```bash
+docker compose -f deploy/docker-compose.yml up --build
+```
+
+The compose file builds the Rust gateway and the C++ inference core, wires them together (`CORE_URL=http://inference_core:8081`), and adds health checks.
+
 For more detailed instructions, see `docs/run.md`.
 
 ## Project Structure
@@ -141,7 +153,7 @@ rust-gpu-inference-gateway/
 
 ## MVP API Overview
 
-The first version will provide a simple inference API:
+The first version provides a simple inference API:
 
 - `POST /infer`
 - `GET /health`
@@ -153,21 +165,23 @@ The API is designed to be easy to call from Python clients and to return clear i
 ## Roadmap
 
 ### Phase 1
-- Implement Rust gateway with basic endpoints
-- Create a worker queue and task scheduler
-- Integrate a real C++ inference core with a CUDA-ready path and CPU fallback
-- Add Python demo client and benchmark scripts
-- Containerize the service with Docker
+- [x] Implement Rust gateway with basic endpoints
+- [x] Create a worker queue and task scheduler
+- [x] Integrate a real C++ inference core with a CUDA-ready path and CPU fallback
+- [x] Add Python demo client and benchmark scripts
+- [x] Containerize the service with Docker (gateway + C++ core images and Compose)
 
 ### Phase 2
-- Add GPU inference support
-- Add model management and storage abstractions
-- Improve observability with Prometheus and tracing
+- [ ] GPU inference support with a real CUDA kernel / model loader
+- [x] Model management: `GET /models` and in-memory model registry
+- [x] Prometheus-formatted metrics endpoint
+- [ ] Expand metrics and tracing (tracing layer, request headers, ...)
 
 ### Phase 3
-- Add multi-model support
-- Add Docker Compose or Kubernetes deployment examples
-- Extend with Solana/zk proof-of-concept integration
+- [ ] Add multi-model support (dynamic model registry backed by storage/core)
+- [ ] Add Kubernetes deployment examples
+- [ ] gRPC API and protobuf definitions
+- [ ] Solana/zk proof-of-concept integration
 
 ## Contributing
 

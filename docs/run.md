@@ -135,7 +135,25 @@ python python/benchmark/benchmark.py
 
 It sends 10 requests to the gateway and prints per-request latency and average latency.
 
-## 6. What this version does
+## 6. Check metrics and models
+
+The gateway exposes Prometheus-formatted metrics:
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+Metrics include request counters by status (`ok` / `error` / `timeout` / `queue_full` / `invalid_request`), the in-flight gauge, latency summary, and a latency histogram.
+
+List known models:
+
+```bash
+curl http://127.0.0.1:8080/models
+```
+
+`POST /infer` validates the `model` field against the registry and returns `400 {"status":"error","message":"unknown model '...'"}` for unknown names.
+
+## 7. What this version does
 
 At present, the system is a working end-to-end proof of concept. It supports:
 
@@ -144,15 +162,18 @@ At present, the system is a working end-to-end proof of concept. It supports:
 - `GET /health` on both layers
 - `POST /infer` through the Rust gateway to the C++ core
 - worker-pool request scheduling and timeouts in the Rust layer
+- Prometheus-compatible `GET /metrics` and a model registry `GET /models`
+- per-request UUID `request_id` correlation across gateway logs and responses
+- environment-variable configuration (`CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, `BIND_ADDR` / `PORT`)
+- Docker images for both services and a Compose file in `deploy/`
 
 The C++ core is not yet a production LLM runtime, but it is a real C++ service with an optional CUDA-ready execution path and a CPU fallback.
 
-## 7. Next steps
+## 8. Next steps
 
 The parts still planned for later versions are:
 
 - GPU model loading and execution with a true CUDA kernel
 - ONNX Runtime / TensorRT integration
-- Prometheus-formatted metrics
-- `GET /models` endpoint and model registry support
-- container orchestration and production deployment examples
+- request batching and dynamic model registry (backed by storage or the core)
+- gRPC API and Kubernetes deployment examples

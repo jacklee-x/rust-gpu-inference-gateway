@@ -39,9 +39,10 @@ Submit an inference request.
 
 #### Notes
 
-- `model` identifies the model to use for inference.
+- `model` identifies the model to use for inference and is validated against the model registry. Unknown models return `400` with `{"status":"error","message":"unknown model '...'"}`.
 - `input` carries the prompt or input payload.
 - `options` may be extended over time.
+- `request_id` is optional: when absent, the gateway generates a UUID and stamps it on the request. The final response always carries the gateway-assigned `request_id`.
 - This endpoint should return a status code of `200` when the request is accepted and processed successfully.
 
 ### GET /health
@@ -56,7 +57,15 @@ Simple health check endpoint.
 
 ### GET /metrics
 
-Prometheus-compatible metrics endpoint used by observability tooling.
+Prometheus-compatible metrics endpoint (text exposition format `0.0.4`) used by observability tooling.
+
+Metrics exposed:
+
+- `inference_requests_total` — accepted requests (counter)
+- `inference_requests_in_flight` — currently processing (gauge)
+- `inference_responses_total{status="ok|error|timeout|queue_full|invalid_request"}` (counter)
+- `inference_latency_ms_sum` / `inference_latency_ms_count` (counter)
+- `inference_latency_ms_bucket{le="..."}` — latency histogram (counter)
 
 ### GET /models
 
@@ -67,7 +76,7 @@ List the models that are currently loaded or available.
 ```json
 {
   "models": [
-    { "name": "llama-7b", "status": "loaded", "device": "gpu0" }
+    { "name": "llama-7b", "status": "loaded", "device": "cpu", "backend": "c++-cpu-fallback" }
   ]
 }
 ```

@@ -96,11 +96,12 @@ Future versions may support:
 
 ## Observability
 
-The Rust gateway should expose:
+The Rust gateway exposes:
 
 - Health check endpoint (`GET /health`)
-- Prometheus metrics endpoint (`GET /metrics`)
-- Structured tracing and log output
+- Prometheus metrics endpoint (`GET /metrics`) — dependency-free text exposition with request/status counters, an in-flight gauge, and a latency histogram
+- A model registry endpoint (`GET /models`) for discovery and request validation
+- Structured tracing and log output, correlated via a gateway-assigned UUID `request_id` per request
 
 The Python tooling will help demonstrate request latency and throughput.
 
