@@ -41,7 +41,7 @@
 
 ## Phase 2: GPU and model support
 
-- [ ] Replace the C++ stub with a real GPU inference implementation
+- [x] Replace the C++ stub with a real GPU inference implementation (llama.cpp + CUDA via `CORE_PROTOCOL=llama-chat`)
 - [x] Add `GET /models` endpoint
 - [x] Add model registry abstraction (`src/models.rs`, in-memory)
 - [x] Expand metrics (Prometheus text format via `src/metrics.rs`) and tracing (request_id spans)

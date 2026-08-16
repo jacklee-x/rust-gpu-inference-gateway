@@ -10,7 +10,7 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 - Prometheus-compatible metrics endpoint (`GET /metrics`)
 - Model registry and discovery endpoint (`GET /models`)
 - Traceable per-request `request_id` (UUID) stamped by the gateway
-- Environment-variable based configuration (`CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
+- Environment-variable based configuration (`CORE_URL`, `CORE_PROTOCOL` (`infer` | `llama-chat`), `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
 - Python tooling for demo clients, model preparation, and benchmark scripts
 - Production-style engineering features: configuration, logging, health checks, metrics, and Docker support
 
@@ -43,6 +43,39 @@ The project is composed of three main layers:
    - Benchmark and load test scripts
 
 ## Quick Start
+
+### GPU mode (llama.cpp + CUDA, recommended)
+
+Requires a CUDA-capable NVIDIA GPU, CUDA Toolkit, CMake and a built
+`llama-server` (see `docs/run.md` §0.1 for build steps), plus a GGUF
+model in `models/` (see §0.2 for the download command).
+
+1. Start llama-server (waits for /health, prints the next command):
+
+   ```bash
+   ./scripts/start-llama-server.sh 8081            # Linux/macOS
+   .\scripts\start-llama-server.ps1                # Windows
+   ```
+
+2. Start the gateway in llama-chat mode:
+
+   ```bash
+   CORE_URL=http://127.0.0.1:8081 CORE_PROTOCOL=llama-chat cargo run --release
+   ```
+
+3. Send an inference request:
+
+   ```bash
+   curl -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" \
+     -d '{"model":"qwen2.5-0.5b-instruct","input":"What is the capital of France?","options":{"max_tokens":32}}'
+   ```
+
+   The response contains a real model-generated `output` plus
+   `request_id`, `usage.latency_ms` (from the GPU core) and `status`.
+   Full verification steps (health, nvidia-smi, pytest) are in
+   `docs/run.md` §0.5.
+
+### CPU mode (mock C++ core, legacy)
 
 1. Clone the repository:
 
@@ -172,7 +205,7 @@ The API is designed to be easy to call from Python clients and to return clear i
 - [x] Containerize the service with Docker (gateway + C++ core images and Compose)
 
 ### Phase 2
-- [ ] GPU inference support with a real CUDA kernel / model loader
+- [x] GPU inference support with a real CUDA kernel / model loader (llama.cpp + CUDA, `CORE_PROTOCOL=llama-chat`)
 - [x] Model management: `GET /models` and in-memory model registry
 - [x] Prometheus-formatted metrics endpoint
 - [ ] Expand metrics and tracing (tracing layer, request headers, ...)

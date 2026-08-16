@@ -12,7 +12,7 @@ Submit an inference request.
 
 ```json
 {
-  "model": "llama-7b",
+  "model": "qwen2.5-0.5b-instruct",
   "input": "Hello world",
   "options": {
     "max_tokens": 32,
@@ -27,10 +27,10 @@ Submit an inference request.
 ```json
 {
   "request_id": "uuid",
-  "model": "llama-7b",
-  "output": "Hello world from model",
+  "model": "qwen2.5-0.5b-instruct",
+  "output": "Hello! How can I help you today?",
   "usage": {
-    "latency_ms": 123,
+    "latency_ms": 301,
     "tokens": 32
   },
   "status": "ok"
@@ -76,10 +76,14 @@ List the models that are currently loaded or available.
 ```json
 {
   "models": [
-    { "name": "llama-7b", "status": "loaded", "device": "cpu", "backend": "c++-cpu-fallback" }
+    { "name": "qwen2.5-0.5b-instruct", "status": "loaded", "device": "gpu0", "backend": "llama.cpp-cuda" }
   ]
 }
 ```
+
+The registry is a static in-memory snapshot (see `src/models.rs`); the
+model actually deployed by llama-server is `qwen2.5-0.5b-instruct`. A
+dynamic registry backed by storage is planned for a later phase.
 
 ### GET /requests/{id}
 

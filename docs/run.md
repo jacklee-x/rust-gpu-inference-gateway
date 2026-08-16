@@ -8,6 +8,119 @@ This page explains how to run the current first-version project and verify its b
 - Python 3.10+ installed
 - `pip` available
 
+## GPU inference mode (llama.cpp + CUDA) — recommended
+
+The current version supports **real GPU inference** through llama.cpp's
+`llama-server`, which replaces the C++ mock core as the backend. The
+gateway talks to it with `CORE_PROTOCOL=llama-chat` (OpenAI-compatible
+`/v1/chat/completions`).
+
+### 0.1 Build llama.cpp with CUDA support
+
+```bash
+# Linux
+git clone https://github.com/ggml-org/llama.cpp.git
+cd llama.cpp
+cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target llama-server -j
+```
+
+Windows (MSVC + nvcc) notes:
+
+- CUDA Toolkit 13.x, VS 2022 (C++ workload) and CMake are required.
+- Add the CUDA toolkit to PATH or set `CUDA_PATH` before configuring
+  (MSBuild otherwise fails with "The CUDA Toolkit directory '' does
+  not exist").
+- Use a target architecture matching your GPU, e.g. for an RTX 2070
+  (Turing, sm_75): `-DCMAKE_CUDA_ARCHITECTURES=75`.
+- At runtime the process needs the CUDA `bin/x64` directory on PATH
+  (cuBLAS DLLs); the start script below does this automatically.
+
+### 0.2 Download a GGUF model
+
+```bash
+mkdir -p models
+curl -L -o models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+  https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+```
+
+(If huggingface.co is unreachable, use the mirror https://hf-mirror.com
+with the same path.)
+
+### 0.3 Start llama-server
+
+Windows:
+
+```powershell
+.\scripts\start-llama-server.ps1 -LlamaServer C:\path\to\llama-server.exe
+```
+
+Linux/macOS:
+
+```bash
+./scripts/start-llama-server.sh 8081
+```
+
+Both scripts wait for `/health` and print the next command to run. They
+load all model layers onto the GPU (`--gpu-layers 99`) and serve under
+the alias `qwen2.5-0.5b-instruct`.
+
+### 0.4 Start the gateway in llama-chat mode
+
+```bash
+CORE_URL=http://127.0.0.1:8081 CORE_PROTOCOL=llama-chat cargo run --release
+```
+
+(The defaults are `CORE_URL=http://127.0.0.1:8081` and
+`CORE_PROTOCOL=infer`; only `CORE_PROTOCOL=llama-chat` needs to be set
+for GPU mode.)
+
+### 0.5 Verify GPU inference end to end
+
+1. Health:
+
+   ```bash
+   curl http://127.0.0.1:8080/health
+   # {"status":"healthy"}
+   ```
+
+2. Inference through the gateway (use the registered model name):
+
+   ```bash
+   curl -X POST http://127.0.0.1:8080/infer -H "Content-Type: application/json" \
+     -d '{"model":"qwen2.5-0.5b-instruct","input":"What is the capital of France?","options":{"max_tokens":32}}'
+   ```
+
+   Expected fields: `request_id`, `model`, `output` (a real model
+   response such as "The capital of France is Paris."), `usage` with
+   `latency_ms` and `tokens`, `status: "ok"`.
+
+3. Confirm the work really runs on the GPU (both processes should appear
+   with compute type `C`):
+
+   ```bash
+   nvidia-smi
+   # | 0 ... llama-server.exe ...  C (or llama-server) |
+   ```
+
+4. Automated test (requires the gateway on port 8080):
+
+   ```bash
+   python -m pytest python/tests -v
+   # python/tests/test_end_to_end.py::test_infer_endpoint PASSED
+   ```
+
+5. `GET /models` shows the loaded GPU model:
+   `{"models":[{"name":"qwen2.5-0.5b-instruct","status":"loaded","device":"gpu0","backend":"llama.cpp-cuda"}, ...]}`
+
+---
+
+## CPU mode (C++ mock core) — legacy
+
+This describes the original mock-based path using `inference_core.cpp`
+(simple uppercase transform, optional toy CUDA branch, CPU fallback).
+It is still supported via the default `CORE_PROTOCOL=infer`.
+
 ## 1. Build and start the C++ inference core
 
 The current version uses a real C++ inference service on `127.0.0.1:8081` instead of the earlier Python mock server.
