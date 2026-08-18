@@ -10,7 +10,8 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 - Prometheus-compatible metrics endpoint (`GET /metrics`)
 - Model registry and discovery endpoint (`GET /models`), dynamically synced with the inference core in `llama-chat` mode (multi-model router support)
 - Traceable per-request `request_id` (UUID) stamped by the gateway
-- Environment-variable based configuration (`CORE_URL`, `CORE_PROTOCOL` (`infer` | `llama-chat`), `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
+- Environment-variable based configuration (`CORE_URL`, `CORE_PROTOCOL` (`infer` | `llama-chat`), `MIN_CONCURRENCY`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
+- Adaptive worker pool: concurrency grows from `MIN_CONCURRENCY` to `MAX_CONCURRENCY` with the request queue depth and collapses when idle (visible in `/metrics` as `inference_worker_pool_size`)
 - Python tooling for demo clients, model preparation, and benchmark scripts
 - Production-style engineering features: configuration, logging, health checks, metrics, and Docker support
 

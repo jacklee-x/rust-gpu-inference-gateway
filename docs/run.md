@@ -306,7 +306,8 @@ At present, the system is a working end-to-end proof of concept. It supports:
 - worker-pool request scheduling and timeouts in the Rust layer
 - Prometheus-compatible `GET /metrics` and a model registry `GET /models`
 - per-request UUID `request_id` correlation across gateway logs and responses
-- environment-variable configuration (`CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, `BIND_ADDR` / `PORT`)
+- environment-variable configuration (`CORE_URL`, `CORE_PROTOCOL`, `MIN_CONCURRENCY`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, `BIND_ADDR` / `PORT`)
+- adaptive worker pool (`MIN_CONCURRENCY`..`MAX_CONCURRENCY`): concurrency grows with queue depth and collapses when idle; exposed in `/metrics` (`inference_worker_pool_size`, `inference_worker_pool_max`)
 - Docker images for both services and a Compose file in `deploy/`
 
 The C++ core is not yet a production LLM runtime, but it is a real C++ service with an optional CUDA-ready execution path and a CPU fallback.

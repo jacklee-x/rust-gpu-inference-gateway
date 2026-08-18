@@ -48,8 +48,8 @@
 
 ## Phase 3: Extension and polish
 
-- [x] Multi-model support (llama-server router mode + dynamic registry synced from `GET /v1/models`; worker pool scaling still open)
-- [ ] Worker pool dynamic scaling
+- [x] Multi-model support (llama-server router mode + dynamic registry synced from `GET /v1/models`)
+- [x] Worker pool dynamic scaling (adaptive `MIN_CONCURRENCY`..`MAX_CONCURRENCY`, resized from queue depth, gauges in `/metrics`)
 - Add Docker Compose or Kubernetes deployment examples
 - Add optional gRPC API and protobuf definitions
 - Add a Solana/zk proof-of-concept integration path
