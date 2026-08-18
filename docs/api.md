@@ -69,21 +69,23 @@ Metrics exposed:
 
 ### GET /models
 
-List the models that are currently loaded or available.
+List the models that are currently loaded or available. In `llama-chat`
+mode this list is synced from the inference core (`GET /v1/models` of
+llama-server) every `REGISTRY_REFRESH_SECS` seconds, so it always
+reflects the real models served, with live `status` values
+(`loaded` / `unloaded` / `failed`, ...). In the legacy `infer` mode a
+static in-memory snapshot is returned.
 
-#### Response
+#### Response (llama-chat mode, router with two models)
 
 ```json
 {
   "models": [
-    { "name": "qwen2.5-0.5b-instruct", "status": "loaded", "device": "gpu0", "backend": "llama.cpp-cuda" }
+    { "name": "qwen2.5-0.5b-instruct-q4_k_m", "status": "loaded", "device": "gpu0", "backend": "llama.cpp-cuda" },
+    { "name": "qwen2.5-1.5b-instruct-q4_k_m", "status": "loaded", "device": "gpu0", "backend": "llama.cpp-cuda" }
   ]
 }
 ```
-
-The registry is a static in-memory snapshot (see `src/models.rs`); the
-model actually deployed by llama-server is `qwen2.5-0.5b-instruct`. A
-dynamic registry backed by storage is planned for a later phase.
 
 ### GET /requests/{id}
 
