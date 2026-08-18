@@ -21,3 +21,6 @@ __pycache__/
 # Downloaded GGUF model weights (large binary files, fetched by build tooling)
 models/
 *.gguf
+
+# Agent workspace (plans, scratch, session state)
+.omo/
