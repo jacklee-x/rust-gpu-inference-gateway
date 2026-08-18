@@ -8,15 +8,23 @@ set -euo pipefail
 # development, then point the Rust gateway at it with CORE_URL and
 # CORE_PROTOCOL=llama-chat.
 #
+# Two serving modes:
+#   - Single model: pass a model file (default
+#     models/qwen2.5-0.5b-instruct-q4_k_m.gguf). llama-server runs as
+#     the classic single-model instance.
+#   - Multi model: set LLAMA_MODELS_DIR (a directory of GGUF files).
+#     llama-server runs in router mode: every model in the directory is
+#     served in its own lazy-loaded child process and appears in
+#     GET /v1/models, which the gateway mirrors dynamically.
+#
 # Prerequisites:
 #   - llama.cpp built with CUDA support (GGML_CUDA=ON), llama-server on
 #     PATH or passed via --llama-server
-#   - a GGUF model file (default: models/qwen2.5-0.5b-instruct-q4_k_m.gguf)
+#   - a GGUF model file
 #
 # Usage:
 #   ./scripts/start-llama-server.sh [PORT] [MODEL] [LAYERS] [CTX]
-# Example:
-#   ./scripts/start-llama-server.sh 8081 models/qwen2.5-0.5b-instruct-q4_k_m.gguf 99 2048
+#   LLAMA_MODELS_DIR=models ./scripts/start-llama-server.sh 8081 "" 99 2048
 #
 # Afterwards start the gateway (in another terminal):
 #   CORE_URL=http://127.0.0.1:8081 CORE_PROTOCOL=llama-chat cargo run --release
@@ -37,15 +45,27 @@ CTX=${4:-2048}    # context window size (-c)
 LLAMA_SERVER=${LLAMA_SERVER:-llama-server}
 
 # Model path: an absolute path is used as-is; a relative path is resolved
-# against the project root.
+# against the project root. Router mode (multi-model) is enabled by
+# setting LLAMA_MODELS_DIR instead.
 case "$MODEL" in
   /*) MODEL_PATH="$MODEL" ;;
   *)  MODEL_PATH="$ROOT_DIR/$MODEL" ;;
 esac
 
-if [ ! -f "$MODEL_PATH" ]; then
-  echo "Model file not found: $MODEL_PATH" >&2
-  exit 1
+if [ -z "${LLAMA_MODELS_DIR:-}" ]; then
+  if [ ! -f "$MODEL_PATH" ]; then
+    echo "Model file not found: $MODEL_PATH" >&2
+    exit 1
+  fi
+else
+  case "$LLAMA_MODELS_DIR" in
+    /*) MODELS_DIR="$LLAMA_MODELS_DIR" ;;
+    *)  MODELS_DIR="$ROOT_DIR/$LLAMA_MODELS_DIR" ;;
+  esac
+  if [ ! -d "$MODELS_DIR" ]; then
+    echo "Models directory not found: $MODELS_DIR" >&2
+    exit 1
+  fi
 fi
 
 # Helper: wait for http 200 on URL (same logic as start-dev.sh)
@@ -76,17 +96,24 @@ if [ -f "$PID_LLAMA" ]; then
   rm -f "$PID_LLAMA"
 fi
 
-# All GGUF layers are offloaded to the GPU (--gpu-layers); the alias
-# matches the gateway model registry entry so /v1/chat/completions
-# requests are served under that name.
+# All GGUF layers are offloaded to the GPU (--gpu-layers). Router mode
+# serves every GGUF in the models directory lazily; single-model mode
+# uses the classic --model/--alias pair.
+SERVE_ARGS=""
+if [ -n "${LLAMA_MODELS_DIR:-}" ]; then
+  SERVE_ARGS="--models-dir $MODELS_DIR"
+else
+  SERVE_ARGS="--model $MODEL_PATH --alias qwen2.5-0.5b-instruct"
+fi
+
 echo "Starting llama-server on 127.0.0.1:$PORT (logs: $LOG_LLAMA)"
+# shellcheck disable=SC2086
 nohup "$LLAMA_SERVER" \
-  --model "$MODEL_PATH" \
+  $SERVE_ARGS \
   --host 127.0.0.1 \
   --port "$PORT" \
   --gpu-layers "$LAYERS" \
   --ctx-size "$CTX" \
-  --alias qwen2.5-0.5b-instruct \
   >"$LOG_LLAMA" 2>&1 &
 LLAMA_PID=$!
 echo "$LLAMA_PID" > "$PID_LLAMA"

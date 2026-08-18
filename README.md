@@ -8,7 +8,7 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 - Task queue and worker pool for request scheduling
 - C++ inference core for GPU-backed model execution
 - Prometheus-compatible metrics endpoint (`GET /metrics`)
-- Model registry and discovery endpoint (`GET /models`)
+- Model registry and discovery endpoint (`GET /models`), dynamically synced with the inference core in `llama-chat` mode (multi-model router support)
 - Traceable per-request `request_id` (UUID) stamped by the gateway
 - Environment-variable based configuration (`CORE_URL`, `CORE_PROTOCOL` (`infer` | `llama-chat`), `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
 - Python tooling for demo clients, model preparation, and benchmark scripts
@@ -211,7 +211,7 @@ The API is designed to be easy to call from Python clients and to return clear i
 - [ ] Expand metrics and tracing (tracing layer, request headers, ...)
 
 ### Phase 3
-- [ ] Add multi-model support (dynamic model registry backed by storage/core)
+- [x] Add multi-model support (llama-server router mode, dynamic model registry synced from the core; scaling still open)
 - [ ] Add Kubernetes deployment examples
 - [ ] gRPC API and protobuf definitions
 - [ ] Solana/zk proof-of-concept integration

@@ -4,6 +4,14 @@
 # core) for local development, then point the Rust gateway at it with
 # CORE_URL and CORE_PROTOCOL=llama-chat.
 #
+# Two serving modes:
+#   - Single model: pass -Model (a GGUF file). llama-server runs as the
+#     classic single-model instance.
+#   - Multi model: pass -ModelsDir (a directory of GGUF files).
+#     llama-server runs in router mode: every model in the directory is
+#     served in its own lazy-loaded child process and appears in
+#     GET /v1/models, which the gateway mirrors dynamically.
+#
 # Prerequisites:
 #   - llama.cpp built with CUDA support (GGML_CUDA=ON), llama-server.exe
 #     on PATH or passed via -LlamaServer
@@ -11,11 +19,13 @@
 #
 # Usage:
 #   .\scripts\start-llama-server.ps1 [-Port 8081] [-Model ..\models\xxx.gguf]
-#     [-Layers 99] [-Context 2048] [-LlamaServer C:\path\to\llama-server.exe]
+#     [-ModelsDir ..\models] [-Layers 99] [-Context 2048]
+#     [-LlamaServer C:\path\to\llama-server.exe]
 
 param(
     [int]$Port = 8081,
     [string]$Model = "..\models\qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    [string]$ModelsDir = "",
     [int]$Layers = 99,          # layers offloaded to GPU (-ngl)
     [int]$Context = 2048,       # context window size (-c)
     [string]$LlamaServer = "llama-server"
@@ -32,33 +42,53 @@ if (Test-Path -LiteralPath $cudaBin) {
     $env:PATH = "$cudaBin;$env:PATH"
 }
 
-# Resolve the model path. An absolute path is used as-is; a relative
-# path is resolved against the script location so this script works no
-# matter where it is invoked from.
+# Resolve the model path for single-model mode. An absolute path is
+# used as-is; a relative path is resolved against the script location so
+# this script works no matter where it is invoked from.
 if ([System.IO.Path]::IsPathRooted($Model)) {
     $ModelPath = $Model
 } else {
     $ModelPath = Join-Path $PSScriptRoot $Model
-}
-if (-not (Test-Path -LiteralPath $ModelPath)) {
-    Write-Error "Model file not found: $ModelPath"
 }
 
 $logDir = Join-Path $PSScriptRoot "..\.dev"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $logFile = Join-Path $logDir "llama-server.log"
 
-# All GGUF layers are offloaded to the GPU (--gpu-layers), so inference
-# runs on the NVIDIA device; the alias matches the gateway model registry
-# entry so /v1/chat/completions requests are served under that name.
-$args = @(
-    "--model", $ModelPath,
-    "--host", "127.0.0.1",
-    "--port", "$Port",
-    "--gpu-layers", "$Layers",
-    "--ctx-size", "$Context",
-    "--alias", "qwen2.5-0.5b-instruct"
-)
+# Build the llama-server arguments. All GGUF layers are offloaded to the
+# GPU (--gpu-layers). -ModelsDir selects router (multi-model) mode:
+# every GGUF in the directory is served lazily and listed by
+# GET /v1/models. Otherwise a single model is loaded with the alias
+# matching the model registry entry.
+if ($ModelsDir) {
+    if ([System.IO.Path]::IsPathRooted($ModelsDir)) {
+        $ModelsDirPath = $ModelsDir
+    } else {
+        $ModelsDirPath = Join-Path $PSScriptRoot $ModelsDir
+    }
+    if (-not (Test-Path -LiteralPath $ModelsDirPath)) {
+        Write-Error "Models directory not found: $ModelsDirPath"
+    }
+    $args = @(
+        "--host", "127.0.0.1",
+        "--port", "$Port",
+        "--models-dir", $ModelsDirPath,
+        "--gpu-layers", "$Layers",
+        "--ctx-size", "$Context"
+    )
+} else {
+    if (-not (Test-Path -LiteralPath $ModelPath)) {
+        Write-Error "Model file not found: $ModelPath"
+    }
+    $args = @(
+        "--model", $ModelPath,
+        "--host", "127.0.0.1",
+        "--port", "$Port",
+        "--gpu-layers", "$Layers",
+        "--ctx-size", "$Context",
+        "--alias", "qwen2.5-0.5b-instruct"
+    )
+}
 
 Write-Host "Starting llama-server on 127.0.0.1:$Port (log: $logFile)"
 $process = Start-Process -FilePath $LlamaServer `

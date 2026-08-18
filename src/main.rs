@@ -23,7 +23,7 @@ mod metrics;
 mod models;
 
 use metrics::{Metrics, Outcome};
-use models::ModelRegistry;
+use models::{ModelInfo, ModelRegistry};
 
 // Request and response payload types for the HTTP API.
 // These structs are serialized/deserialized as JSON by axum/serde.
@@ -113,6 +113,9 @@ struct Config {
     max_concurrency: usize,
     queue_capacity: usize,
     request_timeout_secs: u64,
+    // How often the background task re-fetches the model registry from
+    // the inference core in llama-chat mode (seconds, default 30).
+    registry_refresh_secs: u64,
 }
 
 // Selects the wire protocol used to talk to the inference core.
@@ -174,6 +177,7 @@ impl Config {
         let max_concurrency = parse_env_usize("MAX_CONCURRENCY", 4);
         let queue_capacity = parse_env_usize("QUEUE_CAPACITY", 100);
         let request_timeout_secs = parse_env_u64("REQUEST_TIMEOUT_SECS", 10);
+        let registry_refresh_secs = parse_env_u64("REGISTRY_REFRESH_SECS", 30);
 
         Config {
             bind_addr,
@@ -182,6 +186,7 @@ impl Config {
             max_concurrency,
             queue_capacity,
             request_timeout_secs,
+            registry_refresh_secs,
         }
     }
 }
@@ -240,10 +245,27 @@ async fn main() {
     tokio::spawn(dispatcher_loop(
         job_receiver,
         config.max_concurrency,
-        inference_core_client,
+        inference_core_client.clone(),
         config.core_url.clone(),
         config.core_protocol,
     ));
+
+    // In llama-chat mode the gateway mirrors the real model list served
+    // by llama-server into the registry. The sync task runs immediately
+    // and then every registry_refresh_secs; failures keep the previous
+    // snapshot (the legacy infer protocol keeps the static default).
+    if config.core_protocol == CoreProtocol::LlamaChat {
+        info!(
+            refresh_secs = %config.registry_refresh_secs,
+            "dynamic model registry sync enabled (llama-chat mode)"
+        );
+        tokio::spawn(registry_sync_loop(
+            model_registry.clone(),
+            inference_core_client,
+            config.core_url.clone(),
+            config.registry_refresh_secs,
+        ));
+    }
 
     let state = AppState {
         job_sender,
@@ -606,4 +628,124 @@ struct LlamaChatUsage {
 struct LlamaChatTimings {
     predicted_ms: Option<f64>,
     total_ms: Option<f64>,
+}
+
+// Target shapes for llama-server `GET /v1/models`. Both the single-model
+// and the router (multi-model) mode expose `data[].id`; only router mode
+// adds `status.value` and `aliases`, so those are optional here.
+#[derive(Deserialize)]
+struct LlamaModelsResponse {
+    data: Vec<LlamaModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct LlamaModelEntry {
+    id: String,
+    #[serde(default)]
+    aliases: Option<Vec<String>>,
+    #[serde(default)]
+    status: Option<LlamaModelStatus>,
+}
+
+#[derive(Deserialize)]
+struct LlamaModelStatus {
+    #[serde(default)]
+    value: String,
+}
+
+// registry_sync_loop is the background task that keeps the model
+// registry in sync with the inference core in llama-chat mode. It
+// fetches `GET /v1/models` immediately on startup and then every
+// `refresh_secs`. A failed fetch only logs a warning and keeps the
+// previous snapshot, so a briefly-unreachable core never empties the
+// registry.
+async fn registry_sync_loop(
+    registry: Arc<ModelRegistry>,
+    client: Client,
+    core_url: String,
+    refresh_secs: u64,
+) {
+    loop {
+        // Cap the fetch so a hung core cannot stall the loop forever.
+        match timeout(
+            Duration::from_secs(10),
+            fetch_core_models(&client, &core_url),
+        )
+        .await
+        {
+            Ok(Ok((models, aliases))) => {
+                let names: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
+                info!(
+                    count = %models.len(),
+                    models = ?names,
+                    "model registry synced from inference core"
+                );
+                registry.replace_all(models, aliases);
+            }
+            Ok(Err(err)) => {
+                warn!(%err, "model registry sync failed; keeping previous snapshot");
+            }
+            Err(_) => {
+                warn!("model registry sync timed out; keeping previous snapshot");
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(refresh_secs)).await;
+    }
+}
+
+// fetch_core_models calls llama-server's OpenAI-compatible model list
+// endpoint and maps it to the gateway's registry format. It returns the
+// model entries plus every alias, so alias-named requests also pass
+// validation (llama-server accepts both the model id and its aliases).
+async fn fetch_core_models(
+    client: &Client,
+    core_url: &str,
+) -> Result<(Vec<ModelInfo>, Vec<String>), String> {
+    let models_url = format!("{}/v1/models", core_url.trim_end_matches('/'));
+    let response = client
+        .get(&models_url)
+        .send()
+        .await
+        .map_err(|err| format!("rpc error: {}", err))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "no body".to_string());
+        return Err(format!("core returned {}: {}", status, text));
+    }
+
+    let parsed: LlamaModelsResponse = response
+        .json()
+        .await
+        .map_err(|err| format!("failed to decode /v1/models response: {}", err))?;
+
+    let models = parsed
+        .data
+        .iter()
+        .map(|entry| {
+            let status = entry
+                .status
+                .as_ref()
+                .map(|s| s.value.clone())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "loaded".to_string());
+            ModelInfo {
+                name: entry.id.clone(),
+                status,
+                device: "gpu0".to_string(),
+                backend: "llama.cpp-cuda".to_string(),
+            }
+        })
+        .collect();
+
+    let aliases = parsed
+        .data
+        .iter()
+        .flat_map(|entry| entry.aliases.clone().unwrap_or_default())
+        .collect();
+
+    Ok((models, aliases))
 }

@@ -49,6 +49,8 @@ with the same path.)
 
 ### 0.3 Start llama-server
 
+Single-model mode:
+
 Windows:
 
 ```powershell
@@ -61,9 +63,36 @@ Linux/macOS:
 ./scripts/start-llama-server.sh 8081
 ```
 
+Multi-model (router) mode — every GGUF in the directory is served in
+its own lazy-loaded child process and listed by `GET /v1/models`:
+
+```powershell
+.\scripts\start-llama-server.ps1 -ModelsDir ..\models -LlamaServer C:\path\to\llama-server.exe
+```
+
+```bash
+LLAMA_MODELS_DIR=models ./scripts/start-llama-server.sh 8081
+```
+
 Both scripts wait for `/health` and print the next command to run. They
-load all model layers onto the GPU (`--gpu-layers 99`) and serve under
-the alias `qwen2.5-0.5b-instruct`.
+load all model layers onto the GPU (`--gpu-layers 99`).
+
+### 0.3.1 Dynamic model registry
+
+In `llama-chat` mode the gateway does **not** trust its static model
+list. A background task pulls the real model list from llama-server's
+`GET /v1/models` immediately on startup and then every
+`REGISTRY_REFRESH_SECS` seconds (default 30), replacing the registry:
+
+- `GET /models` always reflects what the core actually serves, including
+  per-model `status` (`loaded` / `unloaded` / `failed`, ...) as reported
+  by llama-server.
+- `POST /infer` validates model names (and aliases) against that list;
+  requests for unknown models get `400 unknown model`.
+- A failed refresh only logs a warning and keeps the previous snapshot
+  (a briefly-unreachable core never empties the registry).
+- In `CORE_PROTOCOL=infer` (legacy) mode the static default registry is
+  used, unchanged.
 
 ### 0.4 Start the gateway in llama-chat mode
 
