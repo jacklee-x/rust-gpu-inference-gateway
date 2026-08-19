@@ -1,0 +1,47 @@
+# llama.cpp build pipeline: proves the build steps documented in
+# docs/run.md §0.1 are reproducible on a clean machine.
+#
+# Note: GitHub-hosted runners have no GPU, so this builds the CPU
+# variant of llama-server (GGML_CUDA omitted). It validates the clone /
+# configure / build commands and produces a runnable binary; real CUDA
+# builds stay a local (or self-hosted GPU runner) task.
+#
+# Triggered manually, or automatically when docs/run.md or this file
+# changes (the build steps are part of the documentation contract).
+name: llama.cpp build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docs/run.md"
+      - ".github/workflows/llama-build.yml"
+
+jobs:
+  build-cpu:
+    name: Build llama-server (CPU, docs §0.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+      # Exactly the commands from docs/run.md §0.1 (without GGML_CUDA).
+      - name: Clone llama.cpp
+        run: git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama.cpp
+
+      - name: Configure
+        working-directory: llama.cpp
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build llama-server
+        working-directory: llama.cpp
+        run: cmake --build build --config Release --target llama-server -j2
+
+      # Smoke test: the binary must exist and print its usage banner.
+      - name: Smoke test
+        working-directory: llama.cpp
+        run: |
+          test -x build/bin/llama-server
+          ./build/bin/llama-server --help | head -5
