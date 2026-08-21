@@ -552,11 +552,7 @@ async fn call_infer_protocol(client: &Client, core_url: &str, req: InferRequest)
 // llama.cpp llama-server OpenAI-compatible format:
 // POST {core}/v1/chat/completions, expecting choices[0].message.content
 // plus usage and timings for latency/token reporting.
-async fn call_llama_chat_protocol(
-    client: &Client,
-    core_url: &str,
-    req: InferRequest,
-) -> JobResult {
+async fn call_llama_chat_protocol(client: &Client, core_url: &str, req: InferRequest) -> JobResult {
     let chat_url = format!("{}/v1/chat/completions", core_url.trim_end_matches('/'));
 
     let mut body = serde_json::json!({
@@ -619,10 +615,7 @@ async fn call_llama_chat_protocol(
         request_id: req.request_id.unwrap_or_default(),
         model: req.model,
         output,
-        usage: Usage {
-            latency_ms,
-            tokens,
-        },
+        usage: Usage { latency_ms, tokens },
         status: "ok".to_string(),
     })
 }

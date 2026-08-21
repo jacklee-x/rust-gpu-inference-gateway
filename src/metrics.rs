@@ -128,8 +128,7 @@ impl Metrics {
         );
         writeln!(
             out,
-            "inference_worker_pool_size{} {}",
-            "",
+            "inference_worker_pool_size {}",
             self.pool_workers_current.load(Ordering::Relaxed)
         )
         .unwrap();
