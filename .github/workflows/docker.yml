@@ -46,7 +46,11 @@ jobs:
             | tee /tmp/infer.json
           grep -q '"status":"ok"' /tmp/infer.json
 
-      # Always tear the stack down, even after a failed smoke test.
+      # Always dump state + logs before tearing down, even after a
+      # failed smoke test, so container crashes are visible in CI.
       - name: Teardown
         if: always()
-        run: docker compose -f deploy/docker-compose.yml down -v
+        run: |
+          docker compose -f deploy/docker-compose.yml ps || true
+          docker compose -f deploy/docker-compose.yml logs --tail=100 || true
+          docker compose -f deploy/docker-compose.yml down -v
