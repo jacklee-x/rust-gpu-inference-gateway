@@ -37,6 +37,9 @@ pub struct Metrics {
     latency_ms_sum: AtomicU64,
     latency_count: AtomicU64,
     latency_histogram: Mutex<[u64; LATENCY_BUCKETS_MS.len()]>,
+    // Adaptive worker pool gauges, updated by the dispatcher on resize.
+    pool_workers_current: AtomicU64,
+    pool_workers_max: AtomicU64,
 }
 
 impl Metrics {
@@ -75,6 +78,14 @@ impl Metrics {
         self.validation_errors_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record the current adaptive worker pool size and its upper bound.
+    /// Called at startup and whenever the dispatcher resizes the pool.
+    pub fn set_pool_workers(&self, current: usize, max: usize) {
+        self.pool_workers_current
+            .store(current as u64, Ordering::Relaxed);
+        self.pool_workers_max.store(max as u64, Ordering::Relaxed);
+    }
+
     /// Render all metrics in the Prometheus text format.
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -105,6 +116,32 @@ impl Metrics {
             out,
             "inference_requests_in_flight {}",
             self.in_flight.load(Ordering::Relaxed)
+        )
+        .unwrap();
+        out.push('\n');
+
+        family(
+            &mut out,
+            "inference_worker_pool_size",
+            "Current adaptive worker pool size (number of concurrent workers).",
+            "gauge",
+        );
+        writeln!(
+            out,
+            "inference_worker_pool_size {}",
+            self.pool_workers_current.load(Ordering::Relaxed)
+        )
+        .unwrap();
+        family(
+            &mut out,
+            "inference_worker_pool_max",
+            "Maximum allowed worker pool size (MAX_CONCURRENCY).",
+            "gauge",
+        );
+        writeln!(
+            out,
+            "inference_worker_pool_max {}",
+            self.pool_workers_max.load(Ordering::Relaxed)
         )
         .unwrap();
         out.push('\n');

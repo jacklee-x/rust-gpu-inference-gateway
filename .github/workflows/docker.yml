@@ -1,0 +1,56 @@
+# Docker pipeline: build both images, bring the compose stack up and
+# verify health + inference through the gateway. This covers the
+# "Docker never verified locally" gap on GitHub-hosted runners.
+name: Docker
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+
+jobs:
+  compose:
+    name: Compose up + smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images
+        run: docker compose -f deploy/docker-compose.yml build
+
+      - name: Start stack
+        run: docker compose -f deploy/docker-compose.yml up -d
+
+      # The compose file wires healthchecks on both services; wait for
+      # the gateway to become reachable (drains retries, then dumps logs).
+      - name: Wait for gateway health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f deploy/docker-compose.yml logs
+          echo "gateway did not become healthy" >&2
+          exit 1
+
+      # Full request path: gateway -> C++ core inside the compose network.
+      - name: Infer through gateway
+        run: |
+          curl -sf -X POST http://127.0.0.1:8080/infer \
+            -H "Content-Type: application/json" \
+            -d '{"model":"llama-7b","input":"Hello from CI","options":{"max_tokens":8}}' \
+            | tee /tmp/infer.json
+          grep -q '"status":"ok"' /tmp/infer.json
+
+      # Always dump state + logs before tearing down, even after a
+      # failed smoke test, so container crashes are visible in CI.
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f deploy/docker-compose.yml ps || true
+          docker compose -f deploy/docker-compose.yml logs --tail=100 || true
+          docker compose -f deploy/docker-compose.yml down -v

@@ -1,0 +1,120 @@
+# CI pipeline: Rust quality gates, Python end-to-end regression and
+# launcher script validation. Runs on every push and pull request.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ------------------------------------------------------------------
+  # Rust: format, clippy and unit tests on Linux + Windows. Windows is
+  # included because the primary dev environment is Windows (MSVC).
+  # ------------------------------------------------------------------
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Cache ~/.cargo and target/ across runs (keyed by Cargo.lock).
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --release
+
+  # ------------------------------------------------------------------
+  # Python: start the mock core + gateway (legacy CORE_PROTOCOL=infer)
+  # on CI and run the end-to-end pytest suite against the real binary.
+  # ------------------------------------------------------------------
+  python:
+    name: Python e2e (mock core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r python/requirements.txt
+
+      - name: Build gateway (release)
+        run: cargo build --release
+
+      - name: Start mock core
+        run: |
+          python cpp_inference/mock_server.py &
+          echo $! > /tmp/mock.pid
+
+      - name: Start gateway (infer protocol)
+        env:
+          CORE_PROTOCOL: infer
+          CORE_URL: http://127.0.0.1:8081
+        run: |
+          ./target/release/rust-gpu-inference-gateway --bind 127.0.0.1:8080 &
+          echo $! > /tmp/gw.pid
+
+      - name: Wait for gateway health
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "gateway did not become healthy" >&2
+          exit 1
+
+      - name: Run pytest
+        run: python -m pytest python/tests -v
+
+      # Always kill background services, even if a step above failed.
+      - name: Teardown
+        if: always()
+        run: |
+          kill "$(cat /tmp/gw.pid)" "$(cat /tmp/mock.pid)" 2>/dev/null || true
+
+  # ------------------------------------------------------------------
+  # Shell: validate the launcher scripts (syntax + shellcheck).
+  # Real GPU behavior is covered locally; CI only checks the scripts.
+  # ------------------------------------------------------------------
+  shell:
+    name: Launcher scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Syntax check (bash -n)
+        run: bash -n scripts/start-llama-server.sh
+
+      - name: Shellcheck
+        run: shellcheck scripts/start-llama-server.sh

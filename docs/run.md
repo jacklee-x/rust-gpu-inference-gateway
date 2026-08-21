@@ -142,6 +142,30 @@ for GPU mode.)
 5. `GET /models` shows the loaded GPU model:
    `{"models":[{"name":"qwen2.5-0.5b-instruct","status":"loaded","device":"gpu0","backend":"llama.cpp-cuda"}, ...]}`
 
+6. Worker pool dynamic scaling:
+
+   ```bash
+   # unit tests cover pool growth/shrink and bounds:
+   cargo test --release
+   # test result: ok. 5 passed (worker_pool::tests::*)
+
+   # load test: fire ~40 concurrent requests while sampling /metrics
+   # e.g. "python python/benchmark/benchmark.py" with a small
+   # concurrent client, or curl in parallel from several terminals:
+   for i in $(seq 1 40); do curl -s -X POST http://127.0.0.1:8080/infer \
+     -H "Content-Type: application/json" \
+     -d '{"model":"qwen2.5-0.5b-instruct","input":"hello","options":{"max_tokens":8}}' & done; wait
+
+   # while the load runs, watch the pool gauge:
+   watch -n 0.2 'curl -s http://127.0.0.1:8080/metrics | grep inference_worker_pool_size'
+   ```
+
+   Expected: `inference_worker_pool_size` rises from `1`
+   (`MIN_CONCURRENCY`) to above the minimum while the queue is deep
+   (up to `inference_worker_pool_max`, i.e. `MAX_CONCURRENCY`), then
+   settles back to `1` once the queue drains. All concurrent requests
+   still return `status: "ok"`.
+
 ---
 
 ## CPU mode (C++ mock core) — legacy
@@ -285,7 +309,7 @@ The gateway exposes Prometheus-formatted metrics:
 curl http://127.0.0.1:8080/metrics
 ```
 
-Metrics include request counters by status (`ok` / `error` / `timeout` / `queue_full` / `invalid_request`), the in-flight gauge, latency summary, and a latency histogram.
+Metrics include request counters by status (`ok` / `error` / `timeout` / `queue_full` / `invalid_request`), the in-flight gauge, latency summary, a latency histogram, and the adaptive worker pool gauges (`inference_worker_pool_size`, `inference_worker_pool_max`).
 
 List known models:
 
@@ -306,7 +330,8 @@ At present, the system is a working end-to-end proof of concept. It supports:
 - worker-pool request scheduling and timeouts in the Rust layer
 - Prometheus-compatible `GET /metrics` and a model registry `GET /models`
 - per-request UUID `request_id` correlation across gateway logs and responses
-- environment-variable configuration (`CORE_URL`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, `BIND_ADDR` / `PORT`)
+- environment-variable configuration (`CORE_URL`, `CORE_PROTOCOL`, `MIN_CONCURRENCY`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, `BIND_ADDR` / `PORT`)
+- adaptive worker pool (`MIN_CONCURRENCY`..`MAX_CONCURRENCY`): concurrency grows with queue depth and collapses when idle; exposed in `/metrics` (`inference_worker_pool_size`, `inference_worker_pool_max`)
 - Docker images for both services and a Compose file in `deploy/`
 
 The C++ core is not yet a production LLM runtime, but it is a real C++ service with an optional CUDA-ready execution path and a CPU fallback.

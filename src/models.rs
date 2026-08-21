@@ -70,10 +70,7 @@ impl ModelRegistry {
             .map(|model| model.name.to_ascii_lowercase())
             .collect();
         known_names.extend(aliases.into_iter().map(|alias| alias.to_ascii_lowercase()));
-        let mut inner = self
-            .inner
-            .write()
-            .expect("registry write lock poisoned");
+        let mut inner = self.inner.write().expect("registry write lock poisoned");
         inner.models = models;
         inner.known_names = known_names;
     }

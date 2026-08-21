@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::{
     net::TcpListener,
-    sync::{mpsc, oneshot, Semaphore},
+    sync::{mpsc, oneshot},
     time::timeout,
 };
 use tracing::{debug, error, info, info_span, warn};
@@ -21,9 +21,11 @@ use uuid::Uuid;
 
 mod metrics;
 mod models;
+mod worker_pool;
 
 use metrics::{Metrics, Outcome};
 use models::{ModelInfo, ModelRegistry};
+use worker_pool::AdaptiveWorkerPool;
 
 // Request and response payload types for the HTTP API.
 // These structs are serialized/deserialized as JSON by axum/serde.
@@ -116,6 +118,9 @@ struct Config {
     // How often the background task re-fetches the model registry from
     // the inference core in llama-chat mode (seconds, default 30).
     registry_refresh_secs: u64,
+    // Adaptive worker pool bounds: the pool grows from min_workers up to
+    // max_concurrency based on the queue length.
+    min_workers: usize,
 }
 
 // Selects the wire protocol used to talk to the inference core.
@@ -175,6 +180,7 @@ impl Config {
         let core_protocol = CoreProtocol::from_env();
 
         let max_concurrency = parse_env_usize("MAX_CONCURRENCY", 4);
+        let min_workers = parse_env_usize("MIN_CONCURRENCY", 1);
         let queue_capacity = parse_env_usize("QUEUE_CAPACITY", 100);
         let request_timeout_secs = parse_env_u64("REQUEST_TIMEOUT_SECS", 10);
         let registry_refresh_secs = parse_env_u64("REGISTRY_REFRESH_SECS", 30);
@@ -187,6 +193,7 @@ impl Config {
             queue_capacity,
             request_timeout_secs,
             registry_refresh_secs,
+            min_workers,
         }
     }
 }
@@ -240,11 +247,21 @@ async fn main() {
     let metrics = Arc::new(Metrics::default());
     let model_registry = Arc::new(ModelRegistry::default());
 
+    // Adaptive worker pool: concurrency grows from MIN_CONCURRENCY up to
+    // MAX_CONCURRENCY with the queue length, and collapses when the
+    // backlog clears. The dispatcher resizes it once per dispatched job.
+    let worker_pool = Arc::new(AdaptiveWorkerPool::new(
+        config.min_workers,
+        config.max_concurrency,
+    ));
+    metrics.set_pool_workers(worker_pool.current_size(), worker_pool.max_size());
+
     // Spawn the dispatcher loop in the background; it will accept jobs
-    // from the queue and spawn worker tasks up to max_concurrency.
+    // from the queue and spawn worker tasks up to the current pool size.
     tokio::spawn(dispatcher_loop(
         job_receiver,
-        config.max_concurrency,
+        worker_pool,
+        metrics.clone(),
         inference_core_client.clone(),
         config.core_url.clone(),
         config.core_protocol,
@@ -318,21 +335,33 @@ async fn main() {
 
 // dispatcher_loop runs indefinitely consuming jobs from the queue.
 // Implementation notes:
-// - A semaphore is used to cap the number of concurrently-running
-//   worker tasks (worker_count). This behaves like a worker pool.
+// - The adaptive worker pool caps the number of concurrently-running
+//   worker tasks and resizes itself from the queue length: deep queues
+//   grow the pool (up to MAX_CONCURRENCY), idle queues collapse it back
+//   to MIN_CONCURRENCY.
 // - For each job, a worker task is spawned that calls the inference core
 //   and forwards the result back to the original requester via a
 //   oneshot channel.
 async fn dispatcher_loop(
     mut job_receiver: mpsc::Receiver<Job>,
-    worker_count: usize,
+    pool: Arc<AdaptiveWorkerPool>,
+    metrics: Arc<Metrics>,
     client: Client,
     core_url: String,
     core_protocol: CoreProtocol,
 ) {
-    let semaphore = Arc::new(Semaphore::new(worker_count));
     while let Some(job) = job_receiver.recv().await {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        // Re-evaluate the pool size from how many jobs are still queued
+        // behind this one, and log growth/shrink decisions for
+        // observability. The metrics are updated on every resize so
+        // /metrics reflects the current pool at any time.
+        let pool_size = pool.reconfigure(job_receiver.len());
+        metrics.set_pool_workers(pool_size, pool.max_size());
+        debug!(pool_size, "worker pool resized");
+
+        // Wait for a permit; acquire() blocks until a worker slot is
+        // available (e.g. when the pool shrank while workers run).
+        let permit = pool.acquire().await;
         let client = client.clone();
         let core_url = core_url.clone();
 
@@ -523,11 +552,7 @@ async fn call_infer_protocol(client: &Client, core_url: &str, req: InferRequest)
 // llama.cpp llama-server OpenAI-compatible format:
 // POST {core}/v1/chat/completions, expecting choices[0].message.content
 // plus usage and timings for latency/token reporting.
-async fn call_llama_chat_protocol(
-    client: &Client,
-    core_url: &str,
-    req: InferRequest,
-) -> JobResult {
+async fn call_llama_chat_protocol(client: &Client, core_url: &str, req: InferRequest) -> JobResult {
     let chat_url = format!("{}/v1/chat/completions", core_url.trim_end_matches('/'));
 
     let mut body = serde_json::json!({
@@ -590,10 +615,7 @@ async fn call_llama_chat_protocol(
         request_id: req.request_id.unwrap_or_default(),
         model: req.model,
         output,
-        usage: Usage {
-            latency_ms,
-            tokens,
-        },
+        usage: Usage { latency_ms, tokens },
         status: "ok".to_string(),
     })
 }

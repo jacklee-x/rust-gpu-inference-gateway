@@ -2,8 +2,10 @@
 # Multi-stage build: compiler image for the build, slim runtime image.
 # Build context must be the repository root:
 #   docker build -f deploy/Dockerfile.gateway -t inference-gateway .
-
-FROM rust:1.81-bookworm AS builder
+#
+# NOTE: the builder must stay on a recent Rust (>= 1.85): transitive
+# deps (idna_adapter) now use edition2024, which older Cargo rejects.
+FROM rust:1-bookworm AS builder
 WORKDIR /app
 COPY Cargo.toml ./
 COPY src/ ./src/

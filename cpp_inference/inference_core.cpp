@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -476,7 +477,10 @@ void handle_client_connection(int client_socket) {
 #endif
 }
 
-void serve_forever(uint16_t port) {
+// Serve forever on the given host address and port. The host is
+// configurable so the same binary works locally (127.0.0.1) and inside
+// containers (0.0.0.0), where peers reach it over a bridge network.
+void serve_forever(const std::string& host, uint16_t port) {
 #if defined(_WIN32)
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
@@ -487,7 +491,7 @@ void serve_forever(uint16_t port) {
 
     const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        std::cerr << "Failed to create socket" << std::endl;
+        std::cerr << "Failed to create socket: " << std::strerror(errno) << std::endl;
         std::exit(1);
     }
 
@@ -501,19 +505,26 @@ void serve_forever(uint16_t port) {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
-    address.sin_addr.s_addr = inet_addr("127.0.0.1");
+    address.sin_addr.s_addr = inet_addr(host.c_str());
+    if (address.sin_addr.s_addr == INADDR_NONE) {
+        std::cerr << "Invalid host address: " << host << std::endl;
+        std::exit(1);
+    }
 
     if (bind(server_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
-        std::cerr << "Bind failed on port " << port << std::endl;
+        // Include errno text: startup crashes inside containers are hard
+        // to diagnose without knowing the exact bind/socket failure.
+        std::cerr << "Bind failed on " << host << ":" << port << ": "
+                  << std::strerror(errno) << std::endl;
         std::exit(1);
     }
 
     if (listen(server_fd, 16) < 0) {
-        std::cerr << "Listen failed" << std::endl;
+        std::cerr << "Listen failed: " << std::strerror(errno) << std::endl;
         std::exit(1);
     }
 
-    std::cout << "C++ inference core listening on 127.0.0.1:" << port << std::endl;
+    std::cout << "C++ inference core listening on " << host << ":" << port << std::endl;
     while (true) {
         sockaddr_in client_address{};
 #if defined(_WIN32)
@@ -536,12 +547,20 @@ void serve_forever(uint16_t port) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Bind address / port are configurable so the same binary works both
+    // locally (127.0.0.1) and inside containers (0.0.0.0), where the
+    // gateway reaches this core over the Docker bridge network.
+    std::string host = "127.0.0.1";
     int port = 8081;
-    if (argc >= 3 && std::string(argv[1]) == "--port") {
-        port = std::stoi(argv[2]);
+    for (int i = 1; i + 1 < argc; i += 2) {
+        if (std::string(argv[i]) == "--host") {
+            host = argv[i + 1];
+        } else if (std::string(argv[i]) == "--port") {
+            port = std::stoi(argv[i + 1]);
+        }
     }
 
     std::cout << "Starting C++ inference core with optional CUDA path" << std::endl;
-    serve_forever(static_cast<uint16_t>(port));
+    serve_forever(host, static_cast<uint16_t>(port));
     return 0;
 }
