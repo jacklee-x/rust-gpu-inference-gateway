@@ -4,7 +4,7 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 
 ## Core Features
 
-- Rust gateway for HTTP/gRPC inference requests
+- Rust gateway for HTTP inference requests (gRPC planned)
 - Task queue and worker pool for request scheduling
 - C++ inference core for GPU-backed model execution
 - Prometheus-compatible metrics endpoint (`GET /metrics`)
@@ -28,7 +28,7 @@ The project is composed of three main layers:
 
 1. **Rust Gateway**
    - Entry point for client requests
-   - HTTP/gRPC API
+   - HTTP API (gRPC planned)
    - Request validation
    - Task scheduling
    - Observability
@@ -180,6 +180,7 @@ rust-gpu-inference-gateway/
 ├── src/
 ├── cpp_inference/
 ├── python/
+├── scripts/
 ├── deploy/
 ├── docs/
 └── .github/
