@@ -34,6 +34,24 @@ jobs:
       # Cache ~/.cargo and target/ across runs (keyed by Cargo.lock).
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install protoc (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $protocVersion = "29.3"
+          $url = "https://github.com/protocolbuffers/protobuf/releases/download/v$protocVersion/protoc-$protocVersion-win64.zip"
+          $zipFile = "$env:TEMP\protoc.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zipFile -UseBasicParsing
+          Expand-Archive -Path $zipFile -DestinationPath "$env:TEMP\protoc" -Force
+          $protocDir = "$env:TEMP\protoc\bin"
+          echo "$protocDir" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+          Remove-Item $zipFile -Force
+          & "$protocDir\protoc.exe" --version
+
       - name: Format check
         run: cargo fmt --all -- --check
 
@@ -56,6 +74,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - uses: actions/setup-python@v5
         with:
