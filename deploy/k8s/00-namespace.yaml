@@ -1,0 +1,5 @@
+# Dedicated namespace for the demo stack.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference-gateway

@@ -1,0 +1,70 @@
+# C++ inference core (CPU mock path, same image as docker-compose).
+#
+# Build & load the image first (see README.md in this directory), e.g.:
+#   docker build -t ghcr.io/jacklee-x/rust-gpu-inference-gateway/inference-core:latest ../cpp_inference
+#
+# For real GPU inference with llama.cpp's llama-server the backend is a
+# different container: run llama-server as its own Deployment (with an
+# nvidia.com/gpu resource and NVIDIA runtimeClassName) and point the
+# gateway's CORE_URL at it with CORE_PROTOCOL=llama-chat instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-core
+  namespace: inference-gateway
+  labels:
+    app: inference-core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-core
+  template:
+    metadata:
+      labels:
+        app: inference-core
+    spec:
+      containers:
+        - name: inference-core
+          image: ghcr.io/jacklee-x/rust-gpu-inference-gateway/inference-core:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+              name: http
+          # The mock core binds 0.0.0.0 by default in its container
+          # entrypoint, so it is reachable across pods.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-core
+  namespace: inference-gateway
+  labels:
+    app: inference-core
+spec:
+  type: ClusterIP
+  selector:
+    app: inference-core
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

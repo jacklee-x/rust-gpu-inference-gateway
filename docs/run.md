@@ -1,12 +1,13 @@
 # Run Guide
 
-This page explains how to run the current first-version project and verify its behavior.
+This page explains how to run the current project and verify its behavior.
 
 ## Prerequisites
 
 - Rust toolchain installed (`rustup`, `cargo`)
 - Python 3.10+ installed
 - `pip` available
+- GPU mode only: NVIDIA GPU with CUDA Toolkit and CMake (see §0.1)
 
 ## GPU inference mode (llama.cpp + CUDA) — recommended
 
@@ -247,7 +248,7 @@ Expected result contains fields like `request_id`, `model`, `output`, `usage`, a
 
 > Note: this version uses a queued worker pool. The Rust gateway accepts requests into a bounded queue and dispatches them to worker tasks that call the C++ inference core on port `8081`. If the queue is full, you may receive a `503` response with `{"status":"queue_full"}`.
 
-## 4. Run the Python demo client
+## 5. Run the Python demo client
 
 Install dependencies.
 
@@ -291,7 +292,7 @@ python3 python/demo/client.py --model llama-7b --input "Hello world"
 
 This script sends a request to the Rust gateway and prints the returned JSON.
 
-## 5. Run the Python benchmark
+## 6. Run the Python benchmark
 
 Run the benchmark script:
 
@@ -301,7 +302,7 @@ python python/benchmark/benchmark.py
 
 It sends 10 requests to the gateway and prints per-request latency and average latency.
 
-## 6. Check metrics and models
+## 7. Check metrics and models
 
 The gateway exposes Prometheus-formatted metrics:
 
@@ -349,10 +350,8 @@ At present, the system is a working end-to-end proof of concept. It supports:
 
 The C++ core is not yet a production LLM runtime, but it is a real C++ service with an optional CUDA-ready execution path and a CPU fallback.
 
-## 8. Next steps
+## 9. Next steps
 
 The parts still planned for later versions are:
 
-- GPU model loading and execution with a true CUDA kernel
-- ONNX Runtime / TensorRT integration
-- request batching and dynamic model registry (backed by storage or the core)
+- Solana/zk proof-of-concept integration

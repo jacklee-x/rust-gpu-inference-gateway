@@ -1,0 +1,102 @@
+# Rust inference gateway: Deployment + ClusterIP Service + HPA.
+#
+# Build & load the image first (see README.md in this directory), e.g.:
+#   docker build -f deploy/Dockerfile.gateway \
+#     -t ghcr.io/jacklee-x/rust-gpu-inference-gateway/gateway:latest .
+#
+# The HPA scales pods on average CPU utilization; it requires
+# metrics-server in the cluster (see README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: inference-gateway
+  labels:
+    app: gateway
+spec:
+  # replicas is intentionally unset: the HPA below owns the replica
+  # count (it starts at minReplicas and adjusts from there).
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: ghcr.io/jacklee-x/rust-gpu-inference-gateway/gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: BIND_ADDR
+              value: 0.0.0.0:8080
+            # K8s service DNS replaces docker-compose's service name;
+            # the wire protocol and ports stay identical.
+            - name: CORE_URL
+              value: http://inference-core.inference-gateway.svc.cluster.local:8081
+            # Set to llama-chat when pointing CORE_URL at llama-server.
+            - name: CORE_PROTOCOL
+              value: infer
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: inference-gateway
+  labels:
+    app: gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Horizontal pod autoscaler for the stateless gateway. The in-process
+# adaptive worker pool (MIN_CONCURRENCY..MAX_CONCURRENCY) handles
+# concurrency inside each pod; this HPA adds cluster-level elasticity
+# by growing the number of pods under sustained CPU pressure.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: inference-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
