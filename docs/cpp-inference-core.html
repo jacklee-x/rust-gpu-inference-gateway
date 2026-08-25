@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C++ Inference Core — 逻辑图与代码解读</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --ink: #1f2937;
+    --ink-soft: #4b5563;
+    --line: #dde3ea;
+    --cpp: #00599C;
+    --cpp-soft: #e8f1f9;
+    --rust: #CE422B;
+    --rust-soft: #fdeeea;
+    --cuda: #76B900;
+    --cuda-soft: #f2f9e4;
+    --cpu: #0e7490;
+    --cpu-soft: #e6f5f8;
+    --warn: #d97706;
+    --warn-soft: #fdf3e3;
+    --danger: #dc2626;
+    --danger-soft: #fef2f2;
+    --code-bg: #0f172a;
+    --code-ink: #dbeafe;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+  }
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(15, 23, 42, .96);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 24px; height: 52px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.15);
+  }
+  nav .brand {
+    color: #fff; font-weight: 700; margin-right: 18px; font-size: 14px;
+    white-space: nowrap;
+  }
+  nav .brand em { color: var(--cuda); font-style: normal; }
+  nav a {
+    color: #cbd5e1; text-decoration: none; font-size: 13px;
+    padding: 6px 12px; border-radius: 6px; transition: .15s;
+    white-space: nowrap;
+  }
+  nav a:hover { background: rgba(255,255,255,.1); color: #fff; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #0f4c81 100%);
+    color: #fff; border-radius: 16px; padding: 36px 40px; margin-bottom: 28px;
+    position: relative; overflow: hidden;
+  }
+  header.hero::after {
+    content: "C++"; position: absolute; right: 30px; top: -30px;
+    font-size: 190px; font-weight: 900; color: rgba(255,255,255,.06);
+    font-family: Consolas, monospace; line-height: 1;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 28px; }
+  header.hero p.sub { margin: 0 0 18px; color: #c7d5e6; max-width: 760px; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22);
+    border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: #e2ecf8;
+  }
+  .chip b { color: #fff; }
+
+  /* ---------- sections ---------- */
+  section.card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 30px; margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(15,23,42,.05);
+  }
+  section.card > h2 {
+    margin: 0 0 6px; font-size: 21px; display: flex; align-items: center; gap: 10px;
+  }
+  section.card > h2 .no {
+    background: var(--cpp); color: #fff; border-radius: 8px;
+    font-size: 13px; padding: 3px 10px; font-weight: 700;
+  }
+  section.card > .lead { color: var(--ink-soft); margin: 0 0 18px; font-size: 14px; }
+
+  h3 { margin: 26px 0 8px; font-size: 16.5px; }
+  h3 .ln { color: var(--cpp); font-family: Consolas, monospace; font-size: 12.5px; background: var(--cpp-soft); padding: 2px 8px; border-radius: 5px; margin-left: 8px; vertical-align: 2px; }
+  h4 { margin: 20px 0 6px; font-size: 15px; }
+
+  p, li { font-size: 14px; }
+  ul { padding-left: 22px; }
+  li { margin: 3px 0; }
+
+  /* ---------- code ---------- */
+  pre {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13px; line-height: 1.65;
+    font-family: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
+    margin: 10px 0 14px; border: 1px solid #1e293b;
+  }
+  pre code { font-family: inherit; }
+  .tok-kw  { color: #c792ea; font-weight: 600; }
+  .tok-str { color: #a5d6a7; }
+  .tok-com { color: #64748b; font-style: italic; }
+  .tok-pp  { color: #f48fb1; }
+  .tok-num { color: #f78c6c; }
+
+  /* ---------- callouts ---------- */
+  .note, .warn, .good {
+    border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px;
+  }
+  .note { background: var(--cpp-soft); border-left: 4px solid var(--cpp); }
+  .warn { background: var(--warn-soft); border-left: 4px solid var(--warn); }
+  .good { background: var(--cuda-soft); border-left: 4px solid var(--cuda); }
+  .note b, .warn b, .good b { display: block; margin-bottom: 2px; }
+
+  /* ---------- tables ---------- */
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f0f4f8; font-weight: 600; white-space: nowrap; }
+  td code, .inline-code { background: #eef1f5; padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 12.5px; color: #0f4c81; }
+  tr:hover td { background: #fafcff; }
+
+  /* ---------- diagram area ---------- */
+  .diagram-box {
+    background: #fbfcfe; border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin: 14px 0; overflow-x: auto;
+  }
+  .diagram-box h3 { margin: 8px 4px 2px; }
+  .diagram-box .dsub { color: var(--ink-soft); font-size: 13px; margin: 0 4px 8px; }
+  svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 6px 4px 2px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  /* SVG node styles */
+  .node rect, .node polygon, .node ellipse { transition: filter .15s, stroke-width .15s; }
+  .node:hover rect, .node:hover polygon, .node:hover ellipse { filter: drop-shadow(0 2px 6px rgba(15,23,42,.25)); stroke-width: 2.5px; cursor: pointer; }
+  .node .t { font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .node .s { font-size: 11px; fill: var(--ink-soft); }
+  .node .badge { font-size: 10px; fill: #fff; }
+  .hl rect { stroke: var(--cpp); stroke-width: 2.5px; fill: var(--cpp-soft); }
+  .hl .t { fill: var(--cpp); }
+  .stage-pill { fill: #eef2f7; stroke: #b8c4d4; stroke-dasharray: 4 3; }
+  .stage-pill text { font-size: 11px; fill: #55677d; font-weight: 600; }
+  .edge-label { font-size: 11.5px; fill: #6b7a90; }
+  .err rect { fill: var(--danger-soft); stroke: var(--danger); }
+  .cuda-box rect { fill: var(--cuda-soft); stroke: var(--cuda); }
+  .cpu-box rect { fill: var(--cpu-soft); stroke: var(--cpu); }
+  .rust-box rect { fill: var(--rust-soft); stroke: var(--rust); }
+  .core-box rect { fill: var(--cpp-soft); stroke: var(--cpp); stroke-width: 2.5px; }
+  .core-box .t { fill: var(--cpp); }
+  .decision polygon { fill: var(--warn-soft); stroke: var(--warn); }
+  .decision .t { fill: var(--warn); }
+  .decision .s { fill: #b45309; }
+  .start rect { fill: #eef4fb; stroke: #3b82f6; stroke-width: 2px; }
+  .loop rect { stroke-dasharray: 6 4; stroke-width: 2px; }
+  .flowline { stroke: #7c8ba0; stroke-width: 1.6; fill: none; }
+  .flowline.errline { stroke: var(--danger); }
+  .flowline.okline { stroke: #16a34a; }
+
+  .btop {
+    position: fixed; right: 26px; bottom: 26px; z-index: 60;
+    background: var(--cpp); color: #fff; border: none; border-radius: 10px;
+    width: 44px; height: 44px; font-size: 18px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,89,156,.35); transition: .15s;
+  }
+  .btop:hover { background: #0b4d84; transform: translateY(-2px); }
+
+  footer { text-align: center; color: #94a3b8; font-size: 12.5px; padding: 10px 0 40px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .flow-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+  .flow-strip .fs {
+    background: #eef2f7; border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; font-size: 12.5px; font-weight: 600; color: #334155;
+  }
+  .flow-strip .fs.c { background: var(--cpp-soft); border-color: var(--cpp); color: var(--cpp); }
+  .flow-strip .arr { color: #94a3b8; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">C++ <em>Inference Core</em> 解读</span>
+  <a href="#overview">概览</a>
+  <a href="#diagrams">逻辑图</a>
+  <a href="#walkthrough">代码解读</a>
+  <a href="#contract">接口契约</a>
+  <a href="#limits">局限与演进</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>cpp_inference / inference_core.cpp — 逻辑图与代码详细解读</h1>
+  <p class="sub">本页面梳理 <b>rust-gpu-inference-gateway</b> 仓库中 C++ 部分的工作：系统定位、3 张逻辑图（端到端链路 / 内部流程 / 推理分支）、逐函数代码解读、接口契约与演进路线。全部内容自包含，离线可用。</p>
+  <div class="chips">
+    <span class="chip">文件：<b>cpp_inference/inference_core.cpp</b></span>
+    <span class="chip">规模：<b>547 行</b> · 单文件 C++17</span>
+    <span class="chip">端点：<b>GET /health</b> · <b>POST /infer</b></span>
+    <span class="chip">依赖：<b>0</b>（原生 Socket，无第三方库）</span>
+    <span class="chip">推理路径：<b>CUDA</b>（可选）↔ <b>CPU 回退</b></span>
+    <span class="chip">监听：<b>127.0.0.1:8081</b></span>
+  </div>
+</header>
+
+<!-- ================= 1. 概览 ================= -->
+<section class="card" id="overview">
+  <h2><span class="no">01</span>系统定位：C++ 推理核心在整个仓库中的角色</h2>
+  <p class="lead">该仓库是三层架构（Rust 网关 → C++ 推理核心 → Python 工具链）。C++ 部分是唯一真正执行"推理"的服务，但当前实现为轻量原型。</p>
+
+  <div class="flow-strip">
+    <span class="fs">客户端<br><small>curl / Python demo</small></span><span class="arr">→</span>
+    <span class="fs">Rust 网关 :8080<br><small>任务队列 + Worker Pool</small></span><span class="arr">→</span>
+    <span class="fs c">C++ 推理核心 :8081<br><small>本次梳理对象</small></span><span class="arr">→</span>
+    <span class="fs">CPU 变换 / CUDA Kernel<br><small>llama-server（GPU 模式）</small></span>
+  </div>
+
+  <ul>
+    <li><b>定位</b>：C++ core 是一个被 Rust 网关通过 <span class="inline-code">reqwest</span> 远程调用的本地推理服务（HTTP over 127.0.0.1），网关不直接执行模型。</li>
+    <li><b>双协议</b>：网关按 <span class="inline-code">CORE_PROTOCOL</span> 环境变量选择 —— <span class="inline-code">infer</span>（调用本 C++ 原型的 <span class="inline-code">POST /infer</span>）或 <span class="inline-code">llama-chat</span>（调用 llama-server 的 <span class="inline-code">/v1/chat/completions</span>）。</li>
+    <li><b>设计意图</b>：演示"请求从客户端出发，穿过 Rust 异步网关，最终落到 GPU 执行"的完整链路；C++ 侧预留了 <span class="inline-code">__CUDACC__</span> 编译钩子作为真实 CUDA 内核的插入点。</li>
+    <li><b>当前形态</b>：不是生产级 LLM 引擎 —— CPU 路径只是对输入做 <b>大写变换</b>；CUDA 路径只是逐字节 +1 的玩具 kernel。真正的模型执行由 <span class="inline-code">llama-server</span>（llama.cpp + CUDA）承担。</li>
+  </ul>
+
+  <div class="note"><b>一句话总结</b>一个零依赖、跨平台（Win/Linux/macOS）、手写原生 Socket 的极简 HTTP 推理服务：<code>main → serve_forever → accept 循环 → 每连接一线程 → 路由 /health | /infer → 解析 JSON → CPU/CUDA 推理 → JSON 响应</code>。</div>
+</section>
+
+<!-- ================= 2. 逻辑图 ================= -->
+<section class="card" id="diagrams">
+  <h2><span class="no">02</span>逻辑图</h2>
+  <p class="lead">共 3 张图：① 端到端调用链路；② C++ Core 内部处理流程（主图）；③ 推理路径分支（CPU / CUDA）。点击图中节点可跳转到对应的代码解读章节。</p>
+
+  <div class="legend">
+    <span><i style="background:#00599C"></i>C++ 相关</span>
+    <span><i style="background:#CE422B"></i>Rust 网关</span>
+    <span><i style="background:#76B900"></i>CUDA 路径</span>
+    <span><i style="background:#0e7490"></i>CPU 路径</span>
+    <span><i style="background:#d97706"></i>判断分支</span>
+    <span><i style="background:#dc2626"></i>错误路径</span>
+    <span><i style="background:#16a34a"></i>成功响应</span>
+    <span>虚线框 = 循环 / 进程边界</span>
+  </div>
+
+  <!-- ============ 图 1：端到端 ============ -->
+  <div class="diagram-box">
+    <h3>图 ① 端到端调用链路（Client → Rust Gateway → C++ Core）</h3>
+    <p class="dsub">infer 协议模式下，一次请求的完整数据流。C++ Core 是链路的末端执行者。</p>
+    <svg viewBox="0 0 1120 430" role="img" aria-label="端到端调用链路图">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/>
+        </marker>
+        <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+        </marker>
+      </defs>
+
+      <!-- 进程边界 -->
+      <rect x="360" y="60" width="740" height="300" rx="16" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="730" y="52" text-anchor="middle" fill="#6b7a90" font-size="13" font-weight="600">本地进程间 HTTP 调用（127.0.0.1）</text>
+
+      <!-- 客户端 -->
+      <g class="node" data-sec="sec-route">
+        <rect x="20" y="140" width="250" height="150" rx="12" fill="#fff" stroke="#64748b" stroke-width="2"/>
+        <text x="145" y="172" text-anchor="middle" class="t" font-size="15">客户端</text>
+        <text x="145" y="196" text-anchor="middle" class="s">curl / PowerShell Invoke-RestMethod</text>
+        <text x="145" y="216" text-anchor="middle" class="s">python/demo/client.py</text>
+        <text x="145" y="236" text-anchor="middle" class="s">python/benchmark/benchmark.py</text>
+        <text x="145" y="262" text-anchor="middle" class="s" font-size="10.5" fill="#94a3b8">发送 {model, input, options}</text>
+      </g>
+
+      <!-- 网关 -->
+      <g class="node rust-box" data-sec="sec-route">
+        <rect x="400" y="110" width="300" height="210" rx="12"/>
+        <text x="550" y="142" text-anchor="middle" class="t" font-size="15">Rust 网关 :8080</text>
+        <text x="550" y="166" text-anchor="middle" class="s">GET /health · /metrics · /models（自带）</text>
+        <text x="550" y="188" text-anchor="middle" class="s">任务队列 + 自适应 Worker Pool</text>
+        <text x="550" y="210" text-anchor="middle" class="s">CORE_PROTOCOL: infer | llama-chat</text>
+        <text x="550" y="232" text-anchor="middle" class="s">traceable request_id（UUID）</text>
+        <rect x="455" y="248" width="190" height="30" rx="7" fill="#fff" stroke="#CE422B" stroke-width="1.2"/>
+        <text x="550" y="268" text-anchor="middle" class="s" font-size="11" fill="#CE422B">调用方 = 推理核心的 HTTP 客户端</text>
+      </g>
+
+      <!-- C++ Core -->
+      <g class="node core-box" data-sec="sec-route">
+        <rect x="790" y="120" width="290" height="190" rx="12"/>
+        <text x="935" y="152" text-anchor="middle" class="t" font-size="15">C++ 推理核心 :8081</text>
+        <text x="935" y="176" text-anchor="middle" class="s">GET /health → healthy JSON</text>
+        <text x="935" y="198" text-anchor="middle" class="s">POST /infer → CPU / CUDA</text>
+        <text x="935" y="220" text-anchor="middle" class="s">手写原生 Socket HTTP 服务</text>
+        <rect x="840" y="240" width="190" height="34" rx="17" fill="#00599C"/>
+        <text x="935" y="262" text-anchor="middle" class="badge">★ 本次梳理对象</text>
+        <rect x="790" y="288" width="290" height="22" rx="6" fill="none" stroke="#00599C" stroke-opacity=".35" stroke-dasharray="4 3"/>
+        <text x="935" y="303" text-anchor="middle" class="s" font-size="10.5">GPU 模式下该角色由 llama-server 替代（/v1/chat/completions）</text>
+      </g>
+
+      <!-- 请求箭头 -->
+      <path class="flowline" d="M270,190 L400,190" marker-end="url(#ar)"/>
+      <text x="335" y="180" text-anchor="middle" class="edge-label">① POST /infer</text>
+      <path class="flowline" d="M700,190 L790,190" marker-end="url(#ar)"/>
+      <text x="745" y="180" text-anchor="middle" class="edge-label">② POST {core}/infer</text>
+      <!-- 响应箭头 -->
+      <path class="flowline okline" d="M790,260 L700,260" marker-end="url(#arG)"/>
+      <text x="745" y="272" text-anchor="middle" class="edge-label" fill="#16a34a">③ 200 JSON</text>
+      <path class="flowline okline" d="M400,260 L270,260" marker-end="url(#arG)"/>
+      <text x="335" y="272" text-anchor="middle" class="edge-label" fill="#16a34a">④ 200 透传</text>
+
+      <text x="560" y="396" text-anchor="middle" fill="#94a3b8" font-size="12">注：CORE_PROTOCOL=llama-chat 时，网关改调 {core}/v1/chat/completions（llama-server 提供），本 C++ 原型仅服务于 infer 协议。</text>
+    </svg>
+  </div>
+
+  <!-- ============ 图 2：内部流程 ============ -->
+  <div class="diagram-box">
+    <h3>图 ② C++ Core 内部处理流程（主图）</h3>
+    <p class="dsub">从 main 入口到线程结束的完整生命周期：4 个阶段 — 启动初始化 → 连接分发 → 请求读取 → 路由与响应。</p>
+    <svg viewBox="0 0 1120 1120" role="img" aria-label="C++ Core 内部处理流程图">
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/>
+        </marker>
+        <marker id="ar2R" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+        </marker>
+        <marker id="ar2G" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+        </marker>
+      </defs>
+
+      <!-- 阶段标签 -->
+      <g class="stage-pill"><rect x="0" y="120" width="140" height="44" rx="22"/><text x="70" y="147" text-anchor="middle">阶段 1 · 启动与初始化</text></g>
+      <g class="stage-pill"><rect x="0" y="540" width="140" height="44" rx="22"/><text x="70" y="567" text-anchor="middle">阶段 2 · 连接分发</text></g>
+      <g class="stage-pill"><rect x="0" y="762" width="140" height="44" rx="22"/><text x="70" y="789" text-anchor="middle">阶段 3 · 请求读取</text></g>
+      <g class="stage-pill"><rect x="0" y="950" width="140" height="44" rx="22"/><text x="70" y="977" text-anchor="middle">阶段 4 · 路由与响应</text></g>
+
+      <!-- 主干 -->
+      <g class="node start" data-sec="sec-main">
+        <rect x="170" y="20" width="340" height="46" rx="10"/>
+        <text x="340" y="42" text-anchor="middle" class="t">main(int argc, char** argv)</text>
+        <text x="340" y="59" text-anchor="middle" class="s">程序入口</text>
+      </g>
+      <path class="flowline" d="M340,66 L340,96" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-main">
+        <rect x="170" y="96" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="118" text-anchor="middle" class="t">解析 --port 参数</text>
+        <text x="340" y="135" text-anchor="middle" class="s">缺省 → 8081（inference_core --port 8081）</text>
+      </g>
+      <path class="flowline" d="M340,142 L340,172" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="172" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="194" text-anchor="middle" class="t">serve_forever(port)</text>
+        <text x="340" y="211" text-anchor="middle" class="s">服务生命周期：初始化 → 监听 → accept 循环</text>
+      </g>
+      <path class="flowline" d="M340,218 L340,248" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="248" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="270" text-anchor="middle" class="t">WSAStartup(MAKEWORD(2,2))</text>
+        <text x="340" y="287" text-anchor="middle" class="s">仅 Windows（winsock2 初始化），失败即 exit(1)</text>
+      </g>
+      <path class="flowline" d="M340,294 L340,324" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="324" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="346" text-anchor="middle" class="t">socket(AF_INET, SOCK_STREAM) + SO_REUSEADDR</text>
+        <text x="340" y="363" text-anchor="middle" class="s">TCP 流式套接字，端口快速复用</text>
+      </g>
+      <path class="flowline" d="M340,370 L340,400" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="400" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="422" text-anchor="middle" class="t">bind(127.0.0.1:port) → listen(16)</text>
+        <text x="340" y="439" text-anchor="middle" class="s">仅绑定回环地址；内核连接队列上限 16</text>
+      </g>
+      <path class="flowline" d="M340,446 L340,476" marker-end="url(#ar2)"/>
+
+      <g class="node loop" data-sec="sec-lifecycle">
+        <rect x="170" y="476" width="340" height="46" rx="10" fill="#fff" stroke="#3b82f6"/>
+        <text x="340" y="498" text-anchor="middle" class="t">accept 循环 while(true)</text>
+        <text x="340" y="515" text-anchor="middle" class="s">主线程永不退出；accept 失败仅报错并继续</text>
+      </g>
+      <path class="flowline" d="M340,522 L340,552" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="552" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="574" text-anchor="middle" class="t">accept() 阻塞等待新连接</text>
+        <text x="340" y="591" text-anchor="middle" class="s">返回 client_fd（连接套接字）</text>
+      </g>
+      <path class="flowline" d="M340,598 L340,628" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-lifecycle">
+        <rect x="170" y="628" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="650" text-anchor="middle" class="t">std::thread(handle_client_connection, fd).detach()</text>
+        <text x="340" y="667" text-anchor="middle" class="s">每连接一个分离线程，accept 循环不被阻塞</text>
+      </g>
+      <path class="flowline" d="M340,674 L340,704" marker-end="url(#ar2)"/>
+
+      <g class="node hl" data-sec="sec-route">
+        <rect x="170" y="704" width="340" height="46" rx="10"/>
+        <text x="340" y="726" text-anchor="middle" class="t">handle_client_connection(fd)</text>
+        <text x="340" y="743" text-anchor="middle" class="s">核心处理器：读请求 → 路由 → 响应 → 关连接</text>
+      </g>
+      <path class="flowline" d="M340,750 L340,780" marker-end="url(#ar2)"/>
+
+      <g class="node" data-sec="sec-http">
+        <rect x="170" y="780" width="340" height="46" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="802" text-anchor="middle" class="t">read_http_request(fd)</text>
+        <text x="340" y="819" text-anchor="middle" class="s">阻塞读到 CRLFCRLF；按 Content-Length 补齐 body；64KB 上限</text>
+      </g>
+
+      <!-- 空请求分支 -->
+      <path class="flowline errline" d="M170,803 L110,803 L110,860 L140,860" marker-end="url(#ar2R)"/>
+      <text x="130" y="793" text-anchor="end" class="edge-label" fill="#dc2626">request.empty()</text>
+      <g class="node err" data-sec="sec-route">
+        <rect x="140" y="838" width="170" height="44" rx="9"/>
+        <text x="225" y="858" text-anchor="middle" class="t" fill="#dc2626">400 Bad Request</text>
+        <text x="225" y="874" text-anchor="middle" class="s" fill="#dc2626">build_error_json("empty request")</text>
+      </g>
+      <path class="flowline errline" d="M225,882 L225,908" marker-end="url(#ar2R)"/>
+      <g class="node" data-sec="sec-route">
+        <rect x="140" y="908" width="170" height="40" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="225" y="933" text-anchor="middle" class="s">close(fd) → 线程结束</text>
+      </g>
+
+      <!-- 路由分派 -->
+      <path class="flowline" d="M340,826 L340,866" marker-end="url(#ar2)"/>
+      <g class="node decision" data-sec="sec-route">
+        <polygon points="340,866 510,892 340,918 170,892"/>
+        <text x="340" y="889" text-anchor="middle" class="t" font-size="12.5">路由分派</text>
+        <text x="340" y="905" text-anchor="middle" class="s" font-size="10.5">解析请求行 method / path</text>
+      </g>
+
+      <!-- health 分支 -->
+      <path class="flowline okline" d="M340,918 L340,990" marker-end="url(#ar2G)"/>
+      <text x="350" y="965" class="edge-label" fill="#16a34a">GET /health</text>
+      <g class="node" data-sec="sec-route">
+        <rect x="250" y="990" width="180" height="44" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="1010" text-anchor="middle" class="t">200 OK</text>
+        <text x="340" y="1027" text-anchor="middle" class="s">{"status":"healthy","engine":"c++-cuda-ready"}</text>
+      </g>
+      <path class="flowline okline" d="M340,1034 L340,1056" marker-end="url(#ar2G)"/>
+      <g class="node" data-sec="sec-route">
+        <rect x="250" y="1056" width="180" height="40" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="340" y="1081" text-anchor="middle" class="s">close(fd) → 线程结束</text>
+      </g>
+
+      <!-- infer 分支 -->
+      <path class="flowline" d="M510,892 L560,884" marker-end="url(#ar2)"/>
+      <text x="528" y="880" text-anchor="middle" class="edge-label">POST /infer</text>
+      <g class="node" data-sec="sec-parse">
+        <rect x="560" y="858" width="210" height="52" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="665" y="880" text-anchor="middle" class="t" font-size="12.5">parse_request_body(body)</text>
+        <text x="665" y="899" text-anchor="middle" class="s">→ InferenceRequest 结构体</text>
+      </g>
+      <path class="flowline" d="M665,910 L665,976" marker-end="url(#ar2)"/>
+      <g class="node" data-sec="sec-infer">
+        <rect x="560" y="976" width="210" height="52" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="665" y="998" text-anchor="middle" class="t" font-size="12.5">build_inference_json()</text>
+        <text x="665" y="1017" text-anchor="middle" class="s">→ CPU / CUDA 推理 + request_id</text>
+      </g>
+      <path class="flowline okline" d="M665,1028 L665,1052" marker-end="url(#ar2G)"/>
+      <g class="node" data-sec="sec-build">
+        <rect x="560" y="1052" width="210" height="44" rx="9" fill="#16a34a" stroke="#16a34a"/>
+        <text x="665" y="1072" text-anchor="middle" class="t" fill="#fff" font-size="12.5">200 OK JSON → close(fd)</text>
+        <text x="665" y="1089" text-anchor="middle" class="s" fill="#eaffea" font-size="10.5">线程结束</text>
+      </g>
+
+      <!-- 404 分支 -->
+      <path class="flowline errline" d="M431,904 L820,904 L820,920" marker-end="url(#ar2R)"/>
+      <text x="505" y="896" class="edge-label" fill="#dc2626">其他 method / path</text>
+      <g class="node err" data-sec="sec-route">
+        <rect x="820" y="920" width="200" height="44" rx="9"/>
+        <text x="920" y="940" text-anchor="middle" class="t" fill="#dc2626">404 Not Found</text>
+        <text x="920" y="956" text-anchor="middle" class="s" fill="#dc2626">build_error_json("route not found")</text>
+      </g>
+      <path class="flowline errline" d="M920,964 L920,994" marker-end="url(#ar2R)"/>
+      <g class="node" data-sec="sec-route">
+        <rect x="820" y="994" width="200" height="40" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="920" y="1019" text-anchor="middle" class="s">close(fd) → 线程结束</text>
+      </g>
+
+      <!-- 回环箭头 -->
+      <path class="flowline" d="M510,575 L1085,575 L1085,499 L510,499" marker-end="url(#ar2)"/>
+      <text x="760" y="567" text-anchor="middle" class="edge-label">连接处理完/失败 → 回到 accept 循环等待下一个连接</text>
+    </svg>
+  </div>
+
+  <!-- ============ 图 3：推理分支 ============ -->
+  <div class="diagram-box">
+    <h3>图 ③ 推理路径分支（CUDA ↔ CPU 回退）</h3>
+    <p class="dsub">编译期（__CUDACC__）与运行期（设备数）双重判断，最终统一出口为 build_inference_json 组装响应。</p>
+    <svg viewBox="0 0 1120 680" role="img" aria-label="推理路径分支图">
+      <defs>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/>
+        </marker>
+      </defs>
+
+      <!-- 入口 -->
+      <g class="node" data-sec="sec-build">
+        <rect x="430" y="16" width="260" height="48" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="560" y="38" text-anchor="middle" class="t" font-size="13">build_inference_json(request)</text>
+        <text x="560" y="56" text-anchor="middle" class="s">调用 run_cuda_inference(request)</text>
+      </g>
+      <path class="flowline" d="M560,64 L560,108" marker-end="url(#ar3)"/>
+
+      <!-- 菱形 1 -->
+      <g class="decision">
+        <polygon points="560,108 690,140 560,172 430,140"/>
+        <text x="560" y="137" text-anchor="middle" class="t" font-size="12">编译时 __CUDACC__ ?</text>
+        <text x="560" y="154" text-anchor="middle" class="s" font-size="10.5">nvcc 编译才定义</text>
+      </g>
+      <!-- 否 → CPU -->
+      <path class="flowline" d="M430,140 L280,140 L280,210" marker-end="url(#ar3)"/>
+      <text x="360" y="132" text-anchor="middle" class="edge-label">否（g++ / clang++ 编译）</text>
+      <g class="node cpu-box" data-sec="sec-infer">
+        <rect x="155" y="210" width="250" height="50" rx="9"/>
+        <text x="280" y="232" text-anchor="middle" class="t" font-size="12.5">run_cpu_inference(request)</text>
+        <text x="280" y="250" text-anchor="middle" class="s">CPU 回退路径</text>
+      </g>
+      <path class="flowline" d="M280,260 L280,290" marker-end="url(#ar3)"/>
+      <g class="node cpu-box" data-sec="sec-infer">
+        <rect x="155" y="290" width="250" height="50" rx="9"/>
+        <text x="280" y="312" text-anchor="middle" class="t" font-size="12.5">toupper 归一化输入</text>
+        <text x="280" y="330" text-anchor="middle" class="s">拼接 model/input/tokens/temperature/top_p</text>
+      </g>
+      <path class="flowline" d="M280,340 L280,370" marker-end="url(#ar3)"/>
+      <g class="node cpu-box" data-sec="sec-infer">
+        <rect x="155" y="370" width="250" height="50" rx="9"/>
+        <text x="280" y="392" text-anchor="middle" class="t" font-size="12.5">返回结果字符串</text>
+        <text x="280" y="410" text-anchor="middle" class="s">（演示语义，非真实模型）</text>
+      </g>
+      <path class="flowline" d="M280,420 L280,600" marker-end="url(#ar3)"/>
+
+      <!-- 是 → 设备检查 -->
+      <path class="flowline" d="M560,172 L560,216" marker-end="url(#ar3)"/>
+      <text x="572" y="190" class="edge-label">是（nvcc 编译）</text>
+      <g class="decision">
+        <polygon points="560,216 690,248 560,280 430,248"/>
+        <text x="560" y="245" text-anchor="middle" class="t" font-size="12">cudaGetDeviceCount &gt; 0 ?</text>
+        <text x="560" y="262" text-anchor="middle" class="s" font-size="10.5">运行期探测 GPU</text>
+      </g>
+
+      <!-- 无设备 → 回退 CPU（箭头指向 CPU 链第三格右侧） -->
+      <path class="flowline" d="M690,248 L920,248 L920,419 L405,419" marker-end="url(#ar3)"/>
+      <text x="710" y="240" class="edge-label">无 CUDA 设备 → 回退 CPU</text>
+
+      <!-- CUDA 链 -->
+      <path class="flowline" d="M560,280 L560,306" marker-end="url(#ar3)"/>
+      <text x="572" y="298" class="edge-label">有设备</text>
+      <g class="node cuda-box" data-sec="sec-infer">
+        <rect x="430" y="306" width="260" height="44" rx="9"/>
+        <text x="560" y="327" text-anchor="middle" class="t" font-size="12.5">cudaMalloc → cudaMemcpy(H2D)</text>
+        <text x="560" y="344" text-anchor="middle" class="s" font-size="10.5">输入字节拷贝到显存</text>
+      </g>
+      <path class="flowline" d="M560,350 L560,380" marker-end="url(#ar3)"/>
+      <g class="node cuda-box" data-sec="sec-infer">
+        <rect x="430" y="380" width="260" height="44" rx="9"/>
+        <text x="560" y="401" text-anchor="middle" class="t" font-size="12.5">kernel&lt;&lt;&lt;grid, block&gt;&gt;&gt; + 同步</text>
+        <text x="560" y="418" text-anchor="middle" class="s" font-size="10.5">玩具内核：逐字节 +1（非模型）</text>
+      </g>
+      <path class="flowline" d="M560,424 L560,454" marker-end="url(#ar3)"/>
+      <g class="node cuda-box" data-sec="sec-infer">
+        <rect x="430" y="454" width="260" height="44" rx="9"/>
+        <text x="560" y="475" text-anchor="middle" class="t" font-size="12.5">cudaMemcpy(D2H) → cudaFree</text>
+        <text x="560" y="492" text-anchor="middle" class="s" font-size="10.5">结果回拷并释放显存</text>
+      </g>
+      <path class="flowline" d="M560,498 L560,528" marker-end="url(#ar3)"/>
+      <g class="node cuda-box" data-sec="sec-infer">
+        <rect x="430" y="528" width="260" height="44" rx="9"/>
+        <text x="560" y="549" text-anchor="middle" class="t" font-size="12.5">返回 CUDA 结果字符串</text>
+        <text x="560" y="566" text-anchor="middle" class="s" font-size="10.5">（真实集成点：TensorRT / ONNX Runtime）</text>
+      </g>
+      <path class="flowline" d="M560,572 L560,608" marker-end="url(#ar3)"/>
+
+      <!-- 合并出口 -->
+      <g class="node" data-sec="sec-build">
+        <rect x="250" y="608" width="320" height="56" rx="10" fill="#fff" stroke="#00599C" stroke-width="2"/>
+        <text x="410" y="630" text-anchor="middle" class="t">统一出口：组装 JSON 响应</text>
+        <text x="410" y="650" text-anchor="middle" class="s">{request_id, model, output, usage{latency_ms, tokens}, status:ok}</text>
+      </g>
+      <text x="210" y="590" text-anchor="middle" class="edge-label">两条路径在此汇合</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ================= 3. 代码解读 ================= -->
+<section class="card" id="walkthrough">
+  <h2><span class="no">03</span>代码详细解读（逐模块）</h2>
+  <p class="lead">按文件从上到下的结构，把 547 行拆成 12 个模块。每个模块给出职责、关键代码与注意点。行号为 inference_core.cpp 中的实际行号。</p>
+
+  <h3>3.1 文件头：设计目标声明 <span class="ln">1-22</span></h3>
+  <ul>
+    <li>文件注释明确了三个目标：<b>零依赖</b>（原生 Socket，方便 Windows/Linux/macOS 三平台编译）；<b>CUDA 集成点</b>（<span class="inline-code">__CUDACC__</span> 时启用 kernel，否则 CPU 回退）；<b>与 Rust 网关的 JSON 线格式兼容</b>（InferRequest / InferResponse 契约）。</li>
+    <li>作者自注：JSON 解析是"intentionally minimal"，生产环境应换 nlohmann/json 或 rapidjson —— 这是理解全篇手写解析器的重要前提。</li>
+  </ul>
+  <div class="note"><b>理解本文件的关键钥匙</b>这是一个"演示完整链路"的原型，不是引擎本体。代码的所有"简陋"之处（手写 JSON、阻塞 recv、每连接一线程）都是为可读性/可移植性刻意取舍的。</div>
+
+  <h3>3.2 跨平台 Socket 抽象层 <span class="ln">36-49</span></h3>
+  <pre><code class="cxx">#if defined(_WIN32)
+#include &lt;winsock2.h&gt;
+#include &lt;ws2tcpip.h&gt;
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include &lt;arpa/inet.h&gt;
+#include &lt;netinet/in.h&gt;
+#include &lt;sys/socket.h&gt;
+#include &lt;unistd.h&gt;
+#endif
+
+#if defined(__CUDACC__)
+#include &lt;cuda_runtime.h&gt;
+#endif</code></pre>
+  <ul>
+    <li>用 <span class="inline-code">_WIN32</span> 宏在 Winsock2 与 POSIX socket 之间切换；后续所有系统调用（<span class="inline-code">recv/send/close/closesocket/accept</span> 等）都用同一宏包裹。</li>
+    <li>Winsock 注意点：必须 <span class="inline-code">WSAStartup</span> 后才能用 socket API；<span class="inline-code">#pragma comment(lib,...)</span> 是 MSVC 专用，MinGW 由链接参数提供。</li>
+    <li><span class="inline-code">__CUDACC__</span> 由 nvcc 编译器预定义 —— 因此"是否启用 CUDA"是<b>编译期</b>决定，而不是运行期配置。</li>
+  </ul>
+
+  <h3>3.3 文本工具：trim 与 json_escape <span class="ln">53-77</span></h3>
+  <pre><code class="cxx">std::string trim(const std::string&amp; value) {
+    const std::string whitespace = " \t\r\n";
+    const auto begin = value.find_first_not_of(whitespace);
+    if (begin == std::string::npos) { return ""; }
+    const auto end = value.find_last_not_of(whitespace);
+    return value.substr(begin, end - begin + 1);
+}
+
+std::string json_escape(const std::string&amp; value) {
+    std::string output; output.reserve(value.size() + 8);
+    for (char ch : value) {
+        switch (ch) {
+            case '\\': output += "\\\\"; break;
+            case '"':  output += "\\\""; break;
+            case '\n': output += "\\n"; break;
+            case '\r': output += "\\r"; break;
+            case '\t': output += "\\t"; break;
+            default:   output += ch; break;
+        }
+    }
+    return output;
+}</code></pre>
+  <ul>
+    <li><span class="inline-code">trim</span>：去掉首尾空白，用于解析 <span class="inline-code">Content-Length</span> 头（<span class="inline-code">stoul</span> 前的必要清洗）。</li>
+    <li><span class="inline-code">json_escape</span>：在<b>输出</b>侧做 JSON 字符串转义（反斜杠、双引号、换行/回车/Tab），防止模型输出或用户输入破坏响应 JSON 结构。注意它不转义控制字符（如 \x00），转义集是演示级最小集。</li>
+  </ul>
+
+  <h3>3.4 手写 JSON 提取器（核心脆弱点） <span class="ln">79-151</span></h3>
+  <pre><code class="cxx">std::string find_json_string_value(const std::string&amp; json, const std::string&amp; key) {
+    const std::string key_pattern = "\"" + key + "\":\"";
+    const auto pos = json.find(key_pattern);
+    if (pos == std::string::npos) { return ""; }
+    const auto start = pos + key_pattern.size();
+    const auto end = json.find('"', start);
+    if (end == std::string::npos) { return ""; }
+    return json.substr(start, end - start);
+}
+
+int find_json_int_value(const std::string&amp; json, const std::string&amp; key, int fallback = 0) {
+    const std::string key_pattern = "\"" + key + "\":";
+    const auto pos = json.find(key_pattern);
+    if (pos == std::string::npos) { return fallback; }
+    const auto start = pos + key_pattern.size();
+    const auto end = json.find_first_not_of("0123456789-", start);
+    const std::string digits = json.substr(start, (end == std::string::npos ? json.size() : end) - start);
+    if (digits.empty()) { return fallback; }
+    return std::stoi(digits);
+}
+
+// float 版本与 int 版本同理，字符集为 "0123456789.-+eE"
+float find_json_float_value(const std::string&amp; json, const std::string&amp; key, float fallback = 0.0f) { ... }
+
+std::string extract_value_from_nested_options(const std::string&amp; json, const std::string&amp; key, const std::string&amp; fallback = "") {
+    // 在 "options" 对象内查找 "key":"..."，用于兼容嵌套 payload 形状
+    const std::string options_key = "\"options\"";
+    const auto options_pos = json.find(options_key);
+    if (options_pos == std::string::npos) { return fallback; }
+    const auto value_start = json.find('"', options_pos + options_key.size());
+    ...
+}</code></pre>
+  <ul>
+    <li><b>工作原理</b>：纯字符串匹配 <span class="inline-code">"key":"</span>（字符串值）或 <span class="inline-code">"key":</span>（数值），再截取到下一个引号 / 非数字字符。这是"足够演示"的最简解析。</li>
+    <li><b>固有缺陷</b>：① 不识别 JSON 结构 —— 若 body 里 model 字段出现在嵌套对象中会被误取；② 字符串值里含转义引号 <span class="inline-code">\"</span> 会提前截断；③ <span class="inline-code">std::stoi</span> 遇到超长数字会抛异常；④ 负数/指数以外的浮点格式（如 <span class="inline-code">1e5</span>）能解析但 <span class="inline-code">NaN</span> 之类会失败。</li>
+    <li><span class="inline-code">extract_value_from_nested_options</span> 是为了同时兼容"顶层 max_tokens"与"options.max_tokens"两种客户端 payload 形状 —— 这是与 Python demo client 对齐的产物。</li>
+  </ul>
+
+  <h3>3.5 请求模型与解析 parse_request_body <span class="ln">153-206</span></h3>
+  <pre><code class="cxx">struct InferenceRequest {
+    std::string model = "llama-7b";
+    std::string input = "hello world";
+    int max_tokens = 32;
+    float temperature = 0.8f;
+    float top_p = 0.95f;
+};
+
+InferenceRequest parse_request_body(const std::string&amp; body) {
+    InferenceRequest request;
+    request.model = find_json_string_value(body, "model");
+    if (request.model.empty()) { request.model = "llama-7b"; }   // 缺省模型
+
+    request.input = find_json_string_value(body, "input");
+    if (request.input.empty()) { request.input = "hello world"; }
+
+    request.max_tokens  = find_json_int_value(body, "max_tokens", 32);
+    request.temperature = find_json_float_value(body, "temperature", 0.8f);
+    request.top_p       = find_json_float_value(body, "top_p", 0.95f);
+
+    // sanitize：非法值回退到安全默认
+    if (request.max_tokens &lt;= 0)      { request.max_tokens = 32; }
+    if (request.temperature &lt;= 0.0f)  { request.temperature = 0.8f; }
+    if (request.top_p &lt;= 0.0f)        { request.top_p = 0.95f; }
+
+    // 兼容嵌套 options 形状
+    const std::string nested = extract_value_from_nested_options(body, "max_tokens");
+    if (!nested.empty()) { request.max_tokens = std::stoi(nested); }
+    return request;
+}</code></pre>
+  <ul>
+    <li><b>缺省优先</b>：所有字段都有合理默认值（llama-7b / hello world / 32 / 0.8 / 0.95），"解析失败 → 回退默认"是全程策略，服务永不因坏输入崩溃。</li>
+    <li><b>sanitize 层</b>：负数/零值被重置，保证后续推理参数始终在安全区间。</li>
+    <li><b>嵌套覆盖</b>：若 <span class="inline-code">options.max_tokens</span> 存在则<b>覆盖</b>顶层值 —— 注意这里嵌套优先级高于顶层。</li>
+    <li>无参数校验上限（如 max_tokens=10^9 也接受），演示级取舍。</li>
+  </ul>
+
+  <h3>3.6 请求 ID 生成 make_request_id <span class="ln">208-214</span></h3>
+  <pre><code class="cxx">std::string make_request_id() {
+    const auto now_ms = std::chrono::duration_cast&lt;std::chrono::milliseconds&gt;(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    std::ostringstream oss;
+    oss &lt;&lt; "cpp-" &lt;&lt; now_ms;
+    return oss.str();
+}</code></pre>
+  <ul>
+    <li>格式 <span class="inline-code">cpp-{epoch_ms}</span>，与 Rust 网关的 UUID 风格区分（网关侧 request_id 为 UUID，C++ 侧以 <span class="inline-code">cpp-</span> 前缀标记来源）。</li>
+    <li>演示级实现：并发下毫秒时间戳可能重复，生产应加原子计数器/随机后缀。</li>
+  </ul>
+
+  <h3>3.7 推理实现：CPU 回退 与 CUDA 路径 <span class="ln">216-294</span></h3>
+  <pre><code class="cxx">std::string run_cpu_inference(const InferenceRequest&amp; request) {
+    std::string text = request.input;
+    // naive normalization: uppercase the input
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast&lt;char&gt;(std::toupper(static_cast&lt;unsigned char&gt;(c)));
+    });
+    std::ostringstream oss;
+    oss &lt;&lt; "C++ CPU inference result for model=" &lt;&lt; request.model
+        &lt;&lt; " input=" &lt;&lt; json_escape(request.input)
+        &lt;&lt; " tokens=" &lt;&lt; request.max_tokens
+        &lt;&lt; " temperature=" &lt;&lt; request.temperature
+        &lt;&lt; " top_p=" &lt;&lt; request.top_p
+        &lt;&lt; " normalized=" &lt;&lt; json_escape(text);
+    return oss.str();
+}
+
+#if defined(__CUDACC__)
+std::string run_cuda_inference(const InferenceRequest&amp; request) {
+    int device_count = 0;
+    cudaGetDeviceCount(&amp;device_count);
+    if (device_count &lt;= 0) { return run_cpu_inference(request); }  // 无 GPU → 回退
+
+    std::string input_copy = request.input;
+    std::vector&lt;char&gt; bytes(input_copy.begin(), input_copy.end());
+    bytes.push_back('\0');
+
+    char* device_buffer = nullptr;
+    cudaMalloc((void**)&amp;device_buffer, bytes.size());
+    cudaMemcpy(device_buffer, bytes.data(), bytes.size(), cudaMemcpyHostToDevice);
+
+    int block_size = 256;
+    int grid_size = (static_cast&lt;int&gt;(bytes.size()) + block_size - 1) / block_size;
+    cuda_kernel&lt;&lt;&lt;grid_size, block_size&gt;&gt;&gt;(device_buffer, static_cast&lt;int&gt;(bytes.size()));
+    cudaDeviceSynchronize();
+
+    char host_buffer[1024] = {0};
+    cudaMemcpy(host_buffer, device_buffer, sizeof(host_buffer), cudaMemcpyDeviceToHost);
+    cudaFree(device_buffer);
+    ...
+}
+
+// 玩具 kernel：逐字节 +1
+__global__ void cuda_kernel(char* buffer, int length) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx &lt; length) { buffer[idx] = static_cast&lt;char&gt;(buffer[idx] + 1); }
+}
+#else
+// 非 nvcc 编译时，CUDA 入口直接走 CPU
+std::string run_cuda_inference(const InferenceRequest&amp; request) {
+    return run_cpu_inference(request);
+}
+#endif</code></pre>
+  <ul>
+    <li><b>双层回退设计</b>：编译期无 CUDA（<span class="inline-code">#else</span> 分支）→ 恒走 CPU；编译期有 CUDA 但运行期无设备（<span class="inline-code">cudaGetDeviceCount == 0</span>）→ 再回退 CPU。任何环境都能跑通端到端链路。</li>
+    <li><b>CUDA 标准流程</b>：H2D 拷贝 → kernel 启动（grid 按输入长度向上取整，block=256 线程）→ <span class="inline-code">cudaDeviceSynchronize</span> → D2H 回拷 → <span class="inline-code">cudaFree</span>。这个骨架正是真实模型推理（TensorRT / ONNX Runtime CUDA provider）的通用形态。</li>
+    <li><b>演示级问题</b>：未检查每个 CUDA API 的返回值（错误被吞）；<span class="inline-code">host_buffer[1024]</span> 若输入超过 1KB 会截断；kernel 语义（逐字节 +1）与"推理"无关。</li>
+    <li><span class="inline-code">std::toupper</span> 前强制转 <span class="inline-code">unsigned char</span>，避免负 char 的 UB —— 这是正规写法。</li>
+  </ul>
+
+  <h3>3.8 响应构建 build_inference_json / build_error_json <span class="ln">296-313</span></h3>
+  <pre><code class="cxx">std::string build_inference_json(const InferenceRequest&amp; request) {
+    const std::string result = run_cuda_inference(request);
+    std::ostringstream json;
+    json &lt;&lt; "{"
+         &lt;&lt; "\"request_id\":\"" &lt;&lt; make_request_id() &lt;&lt; "\","
+         &lt;&lt; "\"model\":\""     &lt;&lt; json_escape(request.model) &lt;&lt; "\","
+         &lt;&lt; "\"output\":\""    &lt;&lt; json_escape(result) &lt;&lt; "\","
+         &lt;&lt; "\"usage\":{\"latency_ms\":" &lt;&lt; 5 &lt;&lt; ",\"tokens\":" &lt;&lt; request.max_tokens &lt;&lt; "},"
+         &lt;&lt; "\"status\":\"ok\""
+         &lt;&lt; "}";
+    return json.str();
+}
+
+std::string build_error_json(const std::string&amp; message, int status_code) {
+    std::ostringstream json;
+    json &lt;&lt; "{\"status\":\"error\",\"message\":\"" &lt;&lt; json_escape(message)
+        &lt;&lt; "\",\"code\":" &lt;&lt; status_code &lt;&lt; "}";
+    return json.str();
+}</code></pre>
+  <ul>
+    <li>成功响应字段：<span class="inline-code">request_id</span> / <span class="inline-code">model</span> / <span class="inline-code">output</span> / <span class="inline-code">usage{latency_ms, tokens}</span> / <span class="inline-code">status</span> —— 与 Rust 网关 <span class="inline-code">InferResponse</span> 结构一一对应（见 §04 契约表）。</li>
+    <li><span class="inline-code">latency_ms</span> 目前是<b>写死的 5</b>（假数据），真实延迟应由推理计时填充 —— 这是与 llama-server 模式的明显差距（llama-server 返回真实耗时）。</li>
+    <li>错误响应统一 <span class="inline-code">{"status":"error","message":...,"code":...}</span>，与网关 503 queue_full 等错误风格一致。</li>
+  </ul>
+
+  <h3>3.9 HTTP 读取层 read_available_data / read_http_request <span class="ln">315-387</span></h3>
+  <pre><code class="cxx">bool read_available_data(int socket_fd, std::string&amp; output, size_t expected_bytes) {
+    output.clear();
+    char buffer[4096];
+    size_t received_total = 0;
+    while (received_total &lt; expected_bytes) {
+        const int chunk_size = static_cast&lt;int&gt;(std::min&lt;size_t&gt;(sizeof(buffer), expected_bytes - received_total));
+        const int received = recv(socket_fd, buffer, chunk_size, 0);
+        if (received &lt;= 0) { return false; }       // 连接关闭/出错
+        output.append(buffer, static_cast&lt;size_t&gt;(received));
+        received_total += static_cast&lt;size_t&gt;(received);
+    }
+    return true;
+}
+
+std::string read_http_request(int socket_fd) {
+    std::string request; char buffer[4096];
+    while (true) {
+        const int received = recv(socket_fd, buffer, sizeof(buffer), 0);
+        if (received &lt;= 0) { return request; }      // 连接关闭 → 返回已读内容
+        request.append(buffer, static_cast&lt;size_t&gt;(received));
+        if (request.find("\r\n\r\n") != std::string::npos) { break; }  // 头终止符
+        if (request.size() &gt; 64 * 1024) { break; }  // 防恶意大请求
+    }
+    // 按 Content-Length 补齐 body
+    const std::string header = request.substr(0, request.find("\r\n\r\n"));
+    const std::string content_length_header = "Content-Length:";
+    const auto position = header.find(content_length_header);
+    if (position != std::string::npos) {
+        ...
+        const size_t content_length = static_cast&lt;size_t&gt;(std::stoul(length_value));
+        ...
+        if (existing_body.size() &lt; content_length) {
+            std::string rest;
+            if (read_available_data(socket_fd, rest, content_length - existing_body.size())) {
+                request.append(rest);
+            }
+        }
+    }
+    return request;
+}</code></pre>
+  <ul>
+    <li><b>两阶段读取</b>：① 循环 <span class="inline-code">recv</span> 直到出现 <span class="inline-code">\r\n\r\n</span>（头结束）；② 发现 <span class="inline-code">Content-Length</span> 头则精确补齐 body 剩余字节（<span class="inline-code">read_available_data</span> 按需循环读，处理了 recv 一次读不全的问题）。</li>
+    <li><b>防护</b>：64KB 上限防止恶意客户端无限灌数据撑爆内存。</li>
+    <li><b>演示级问题</b>：① <span class="inline-code">std::stoul</span> 遇到非法头会抛异常（未捕获 → 线程崩溃，进程因 detach 线程异常而 terminate！）；② 头名大小写敏感（只认 <span class="inline-code">Content-Length:</span> 精确匹配）；③ 阻塞式读取无超时 —— 慢客户端能占住线程无限久。</li>
+  </ul>
+
+  <h3>3.10 响应发送 send_response <span class="ln">391-401</span></h3>
+  <pre><code class="cxx">void send_response(int client_socket, const std::string&amp; status_line, const std::string&amp; payload) {
+    const std::string response =
+        status_line + "Content-Type: application/json\r\n"
+        + "Content-Length: " + std::to_string(payload.size()) + "\r\n"
+        + "Connection: close\r\n\r\n" + payload;
+    send(client_socket, response.c_str(), static_cast&lt;int&gt;(response.size()), 0);
+}</code></pre>
+  <ul>
+    <li>固定 <span class="inline-code">application/json</span> + 正确 <span class="inline-code">Content-Length</span>（Rust 侧 reqwest 依赖它判断 body 边界）。</li>
+    <li><span class="inline-code">Connection: close</span> + 发送后即关连接 —— 简化了 keep-alive 的复杂度（每请求一线程 + 短连接，吞吐必然有限，但原型可接受）。</li>
+  </ul>
+
+  <h3>3.11 核心处理器与路由 handle_client_connection <span class="ln">403-477</span></h3>
+  <pre><code class="cxx">void handle_client_connection(int client_socket) {
+    const std::string request = read_http_request(client_socket);
+    if (request.empty()) {
+        send_response(client_socket, "HTTP/1.1 400 Bad Request\r\n", build_error_json("empty request", 400));
+        closesocket(client_socket); return;
+    }
+    // 解析请求行：METHOD PATH VERSION
+    const auto request_line_end = request.find("\r\n");
+    const std::string request_line = request.substr(0, request_line_end);
+    std::istringstream iss(request_line);
+    std::string method, path, version;
+    iss &gt;&gt; method &gt;&gt; path &gt;&gt; version;
+
+    if (method == "GET" &amp;&amp; path == "/health") {
+        const std::string payload = "{\"status\":\"healthy\",\"engine\":\"c++-cuda-ready\"}";
+        send_response(client_socket, "HTTP/1.1 200 OK\r\n", payload);
+        closesocket(client_socket); return;
+    }
+
+    if (method == "POST" &amp;&amp; path == "/infer") {
+        const auto body_start = request.find("\r\n\r\n");
+        if (body_start == std::string::npos) { ...400 "missing body"... }
+        const std::string body = request.substr(body_start + 4);
+        const InferenceRequest request_details = parse_request_body(body);
+        const std::string payload = build_inference_json(request_details);
+        send_response(client_socket, "HTTP/1.1 200 OK\r\n", payload);
+        closesocket(client_socket); return;
+    }
+
+    // 未知路由
+    send_response(client_socket, "HTTP/1.1 404 Not Found\r\n", build_error_json("route not found", 404));
+    closesocket(client_socket);
+}</code></pre>
+  <ul>
+    <li><b>路由表</b>：仅 3 条规则 —— <span class="inline-code">GET /health</span> → 200 healthy；<span class="inline-code">POST /infer</span> → 200 推理结果；其余 → 404。health 的 <span class="inline-code">engine:"c++-cuda-ready"</span> 字段是给编排脚本（start-dev.sh 等）探测用的。</li>
+    <li>每个分支结束后都关闭套接字 —— 无泄漏路径；错误分支复用 <span class="inline-code">build_error_json</span> 保证响应结构一致。</li>
+    <li>每连接一个 <span class="inline-code">std::thread</span> + <span class="inline-code">detach()</span>：accept 循环不被阻塞，但<b>无并发上限</b> —— 高并发下线程数无限增长（C10K 问题的反面教材，原型可接受）。</li>
+  </ul>
+
+  <h3>3.12 服务生命周期 serve_forever 与 main <span class="ln">479-547</span></h3>
+  <pre><code class="cxx">void serve_forever(uint16_t port) {
+#if defined(_WIN32)
+    WSADATA wsa_data;
+    if (WSAStartup(MAKEWORD(2, 2), &amp;wsa_data) != 0) {
+        std::cerr &lt;&lt; "Failed to initialize Winsock" &lt;&lt; std::endl; std::exit(1);
+    }
+#endif
+    const int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd &lt; 0) { std::cerr &lt;&lt; "Failed to create socket" &lt;&lt; std::endl; std::exit(1); }
+
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, ...);
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = inet_addr("127.0.0.1");   // 只监听回环
+
+    if (bind(server_fd, ...) &lt; 0)  { std::cerr &lt;&lt; "Bind failed on port " &lt;&lt; port &lt;&lt; std::endl; std::exit(1); }
+    if (listen(server_fd, 16) &lt; 0) { std::cerr &lt;&lt; "Listen failed" &lt;&lt; std::endl; std::exit(1); }
+
+    std::cout &lt;&lt; "C++ inference core listening on 127.0.0.1:" &lt;&lt; port &lt;&lt; std::endl;
+    while (true) {
+        const int client_fd = accept(server_fd, ...);
+        if (client_fd &lt; 0) { std::cerr &lt;&lt; "Accept failed" &lt;&lt; std::endl; continue; }
+        std::thread client_thread(handle_client_connection, client_fd);
+        client_thread.detach();
+    }
+}
+
+int main(int argc, char** argv) {
+    int port = 8081;
+    if (argc &gt;= 3 &amp;&amp; std::string(argv[1]) == "--port") { port = std::stoi(argv[2]); }
+    std::cout &lt;&lt; "Starting C++ inference core with optional CUDA path" &lt;&lt; std::endl;
+    serve_forever(static_cast&lt;uint16_t&gt;(port));
+    return 0;
+}</code></pre>
+  <ul>
+    <li><b>初始化失败即退出</b>（<span class="inline-code">std::exit(1)</span>）：socket/bind/listen 任何一步失败都无法提供服务，快速失败让编排脚本（start-dev.sh 会等待 /health 并回滚）及时感知。</li>
+    <li>只绑定 <span class="inline-code">127.0.0.1</span>（回环）：安全设计 —— 服务不暴露到外部网络，只服务本机 Rust 网关。</li>
+    <li><span class="inline-code">accept</span> 失败仅打印并 continue（不退出），提高健壮性；listen 队列 16。</li>
+    <li>主线程 = accept 循环，工作线程 = 连接处理，两者通过 <span class="inline-code">detach()</span> 解耦 —— 经典"每连接一线程"模型。</li>
+    <li><span class="inline-code">main</span> 的 CLI 仅支持 <span class="inline-code">--port N</span>（run_core.sh 与 Dockerfile 都以该参数启动）。</li>
+  </ul>
+
+  <h3>3.13 构建与部署配套（build.sh / run_core.sh / Dockerfile） <span class="ln">仓库文件</span></h3>
+  <pre><code class="cxx"># build.sh 的编译器选择策略（优先级递减）：
+#   1) nvcc   → 启用 __CUDACC__，编译出带 CUDA kernel 的二进制
+#   2) g++    → -std=c++17 -O2 -pthread，纯 CPU 回退
+#   3) clang++→ 同上
+# Dockerfile（多阶段构建）：
+#   FROM gcc:13-bookworm AS builder   → g++ 编译出 inference_core
+#   FROM debian:bookworm-slim        → wget 做 compose healthcheck
+#   ENTRYPOINT ["inference_core", "--port", "8081"]</code></pre>
+  <ul>
+    <li><b>编译矩阵</b>：同一份源码通过编译器选择产出两种二进制 —— 这正是 <span class="inline-code">__CUDACC__</span> 双路径设计的落地：有 nvcc 环境自动出 CUDA 版，否则自动出 CPU 版，开发者无需改代码。</li>
+    <li><b>运行脚本</b>：<span class="inline-code">run_core.sh [port]</span> 前台运行并透传 <span class="inline-code">--port</span>；<span class="inline-code">scripts/start-dev.sh</span> 会同时拉起 C++ core 与 Rust 网关并做健康检查（等待 /health 成功、失败回滚）。</li>
+    <li><b>容器化</b>：Dockerfile 多阶段构建（gcc:13 编译 → debian-slim 运行），仅打包 CPU 回退二进制；compose 中 <span class="inline-code">CORE_URL=http://inference_core:8081</span> 把网关与 core 连成服务网络。</li>
+  </ul>
+</section>
+
+<!-- ================= 4. 接口契约 ================= -->
+<section class="card" id="contract">
+  <h2><span class="no">04</span>接口契约：与 Rust 网关的协议对齐</h2>
+  <p class="lead">C++ core 的 HTTP 契约必须与 Rust 网关 <span class="inline-code">call_infer_protocol</span>（src/main.rs）严格一致 —— 网关负责把客户端请求转发、把核心响应透传。</p>
+
+  <h3>4.1 POST /infer 请求体</h3>
+  <table>
+    <tr><th>字段</th><th>类型</th><th>默认值</th><th>说明</th></tr>
+    <tr><td><code>model</code></td><td>string</td><td><code>llama-7b</code></td><td>模型名，原型中仅透传回响应</td></tr>
+    <tr><td><code>input</code></td><td>string</td><td><code>hello world</code></td><td>推理输入文本</td></tr>
+    <tr><td><code>max_tokens</code></td><td>int</td><td><code>32</code></td><td>可放顶层，也可放 <code>options.max_tokens</code>（嵌套优先）</td></tr>
+    <tr><td><code>temperature</code></td><td>float</td><td><code>0.8</code></td><td>采样温度，仅展示于输出描述</td></tr>
+    <tr><td><code>top_p</code></td><td>float</td><td><code>0.95</code></td><td>核采样，仅展示于输出描述</td></tr>
+  </table>
+
+  <h3>4.2 成功响应（HTTP 200）</h3>
+  <table>
+    <tr><th>字段</th><th>说明</th></tr>
+    <tr><td><code>request_id</code></td><td>格式 <code>cpp-{epoch_ms}</code>，与网关侧 UUID 来源区分</td></tr>
+    <tr><td><code>model</code></td><td>回显请求中的模型名</td></tr>
+    <tr><td><code>output</code></td><td>推理结果字符串（CPU 变换 / CUDA kernel 输出）</td></tr>
+    <tr><td><code>usage.latency_ms</code></td><td>当前为写死 <code>5</code>（演示假数据）</td></tr>
+    <tr><td><code>usage.tokens</code></td><td>回显 <code>max_tokens</code></td></tr>
+    <tr><td><code>status</code></td><td><code>ok</code></td></tr>
+  </table>
+
+  <h3>4.3 错误响应与状态码</h3>
+  <table>
+    <tr><th>场景</th><th>状态码</th><th>响应体</th></tr>
+    <tr><td>空请求 / 读取失败</td><td><code>400</code></td><td><code>{"status":"error","message":"empty request","code":400}</code></td></tr>
+    <tr><td>POST /infer 无 body</td><td><code>400</code></td><td><code>... "missing body" ...</code></td></tr>
+    <tr><td>未知 method / path</td><td><code>404</code></td><td><code>... "route not found" ...</code></td></tr>
+    <tr><td>网关侧队列已满（非 C++ core 返回）</td><td><code>503</code></td><td><code>{"status":"queue_full"}</code>（Rust 网关直接返回）</td></tr>
+  </table>
+
+  <h3>4.4 与网关的三种调用模式对照</h3>
+  <table>
+    <tr><th>模式（CORE_PROTOCOL）</th><th>网关调用的端点</th><th>服务提供方</th></tr>
+    <tr><td><code>infer</code>（默认）</td><td><code>POST {core}/infer</code></td><td>本 C++ 原型 core（127.0.0.1:8081）</td></tr>
+    <tr><td><code>llama-chat</code>（GPU 模式）</td><td><code>POST {core}/v1/chat/completions</code></td><td>llama-server（llama.cpp + CUDA，支持多模型路由）</td></tr>
+    <tr><td>模型注册表同步</td><td><code>GET {core}/v1/models</code></td><td>llama-server（网关动态同步到 /models 端点）</td></tr>
+  </table>
+  <div class="note"><b>结论</b>在 GPU 生产模式下，C++ 原型 core 的角色被 llama-server 完全替代；本文件实现的 <code>infer</code> 协议仍是 CPU/无 GPU 环境（CI、Docker CPU 镜像、教学演示）的默认链路。</div>
+</section>
+
+<!-- ================= 5. 局限与演进 ================= -->
+<section class="card" id="limits">
+  <h2><span class="no">05</span>局限性与演进路线</h2>
+  <div class="grid2">
+    <div>
+      <h3>当前局限（原型取舍）</h3>
+      <ul>
+        <li><b>手写 JSON 解析</b>：字符串匹配式提取，遇到嵌套/转义/非法数字会误解析或抛异常，应换 nlohmann/json 或 rapidjson。</li>
+        <li><b>每连接一线程且无上限</b>：并发一高线程数就失控；无连接超时，慢客户端可永久占住线程。</li>
+        <li><b>阻塞式 recv + 无请求超时</b>：不适合高吞吐，应引入 epoll/io_uring 或直接上 asio。</li>
+        <li><b>非真实推理</b>：CPU 只是 toupper，CUDA 只是逐字节 +1；<code>latency_ms</code> 写死 5。</li>
+        <li><b>健壮性缺口</b>：CUDA API 返回值未检查；<code>stoul/stoi</code> 异常未捕获（可导致进程 terminate）；无日志/指标/鉴权。</li>
+      </ul>
+    </div>
+    <div>
+      <h3>演进路线（README / cpp_inference/README.md Roadmap）</h3>
+      <ul>
+        <li><b>短期</b>：把 CPU 回退换成真实 CUDA kernel + 模型加载；集成 ONNX Runtime 或 TensorRT 做生产推理。</li>
+        <li><b>中期</b>：请求批处理（batching）、动态模型加载/卸载、模型状态查询。</li>
+        <li><b>长期</b>：gRPC + protobuf 替代手写 HTTP；Kubernetes 部署；Solana/zk PoC。</li>
+        <li><b>已落地（仓库现状）</b>：llama.cpp + CUDA 的 <code>llama-chat</code> 模式、动态模型注册表、自适应 Worker Pool —— 仓库的 GPU 演进实际发生在 llama-server 侧，而非本 C++ 文件。</li>
+      </ul>
+    </div>
+  </div>
+  <div class="good"><b>总体评价</b>这份 547 行的 C++ 代码完成了它的使命：用最少的依赖演示了"Rust 网关 → C++ 推理服务 → JSON 结果"的完整闭环，并预留了清晰的 CUDA 集成点与 CPU 回退路径。作为架构演示与教学素材非常合格；作为生产推理引擎则明确地让位给了 llama.cpp 生态。</div>
+</section>
+
+<footer>
+  rust-gpu-inference-gateway · docs/cpp-inference-core.html · 生成于 2026-08-18 · 自包含单文件（离线可打开）<br>
+  数据来源：cpp_inference/inference_core.cpp（547 行）、cpp_inference/build.sh / run_core.sh / Dockerfile、src/main.rs（网关调用侧）、README.md
+</footer>
+
+</main>
+
+<button class="btop" id="btop" title="回到顶部">↑</button>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 轻量 C++ 语法高亮（逐字符扫描） ---------- */
+  var KW = new Set(("alignas alignof asm auto bool break case catch char class const constexpr continue "
+    + "default delete do double else enum explicit export extern false float for friend goto if inline "
+    + "int long mutable namespace new noexcept nullptr operator private protected public register "
+    + "reinterpret_cast return short signed sizeof static static_cast struct switch template this throw "
+    + "true try typedef typename union unsigned using virtual void volatile while std string vector thread "
+    + "ostream istringstream size_t ssize_t uint16_t int64_t int32_t").split(" "));
+
+  function isIdent(c) { return /[A-Za-z_$]/.test(c); }
+  function isDigit(c) { return /[0-9]/.test(c); }
+
+  function highlightCpp(raw) {
+    var s = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var out = "", i = 0, n = s.length;
+    var mode = "code", quote = '"';
+    function span(cls, txt) { return cls ? '<span class="' + cls + '">' + txt + "</span>" : txt; }
+    while (i < n) {
+      var c = s[i];
+      if (mode === "line") {
+        if (c === "\n") { out += "\n</span>"; mode = "code"; }
+        else { out += c; }
+        i++; continue;
+      }
+      if (mode === "block") {
+        if (c === "*" && s[i + 1] === "/") { out += "*/</span>"; i += 2; mode = "code"; }
+        else { out += c; i++; }
+        continue;
+      }
+      if (mode === "str") {
+        if (c === "\\") { out += c + (s[i + 1] || ""); i += 2; continue; }
+        if (c === quote) { out += c + "</span>"; mode = "code"; i++; continue; }
+        out += c; i++; continue;
+      }
+      /* code mode */
+      if (c === "/" && s[i + 1] === "/") { out += '<span class="tok-com">//'; i += 2; mode = "line"; continue; }
+      if (c === "/" && s[i + 1] === "*") { out += '<span class="tok-com">/*'; i += 2; mode = "block"; continue; }
+      if (c === '"' || c === "'") { out += '<span class="tok-str">' + c; quote = c; mode = "str"; i++; continue; }
+      if (c === "#") {
+        var j = i; while (j < n && s[j] !== "\n") { j++; }
+        out += '<span class="tok-pp">' + s.slice(i, j) + "</span>";
+        i = j; continue;
+      }
+      if (isIdent(c)) {
+        var j2 = i; while (j2 < n && (isIdent(s[j2]) || isDigit(s[j2]))) { j2++; }
+        var w = s.slice(i, j2);
+        out += KW.has(w) ? '<span class="tok-kw">' + w + "</span>" : w;
+        i = j2; continue;
+      }
+      if (isDigit(c) || (c === "." && isDigit(s[i + 1]))) {
+        var j3 = i; while (j3 < n) {
+          var ch = s[j3];
+          if (/[0-9a-fA-FxX.eE]/.test(ch)) { j3++; continue; }
+          if ((ch === "+" || ch === "-") && /[eE]/.test(s[j3 - 1] || "")) { j3++; continue; }
+          break;
+        }
+        out += '<span class="tok-num">' + s.slice(i, j3) + "</span>";
+        i = j3; continue;
+      }
+      out += c; i++;
+    }
+    return out;
+  }
+
+  document.querySelectorAll("pre code.cxx").forEach(function (el) {
+    el.innerHTML = highlightCpp(el.textContent);
+  });
+
+  /* ---------- 图节点点击 → 跳转对应解读章节 ---------- */
+  document.querySelectorAll("svg .node").forEach(function (g) {
+    g.addEventListener("click", function () {
+      var sec = g.getAttribute("data-sec");
+      if (sec) {
+        var target = document.getElementById(sec);
+        if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      }
+    });
+  });
+
+  /* ---------- 回到顶部 ---------- */
+  var btop = document.getElementById("btop");
+  btop.addEventListener("click", function () { window.scrollTo({ top: 0, behavior: "smooth" }); });
+  window.addEventListener("scroll", function () {
+    btop.style.display = window.scrollY > 400 ? "block" : "none";
+  });
+  btop.style.display = "none";
+})();
+</script>
+
+</body>
+</html>

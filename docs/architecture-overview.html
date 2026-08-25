@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rust-gpu-inference-gateway — 整体架构总览</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --ink: #1f2937; --ink-soft: #4b5563; --line: #dde3ea;
+    --rust: #CE422B; --rust-soft: #fdeeea;
+    --cpp: #00599C; --cpp-soft: #e8f1f9;
+    --gpu: #76B900; --gpu-soft: #f2f9e4;
+    --py: #3776AB; --py-soft: #eaf3fa;
+    --dep: #7c3aed; --dep-soft: #f3effc;
+    --warn: #d97706; --warn-soft: #fdf3e3;
+    --code-bg: #0f172a; --code-ink: #dbeafe;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.7;
+  }
+  nav {
+    position: sticky; top: 0; z-index: 50; background: rgba(15,23,42,.96); backdrop-filter: blur(6px);
+    display: flex; align-items: center; gap: 4px; padding: 0 24px; height: 52px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.15);
+  }
+  nav .brand { color: #fff; font-weight: 700; margin-right: 18px; font-size: 14px; white-space: nowrap; }
+  nav .brand em { color: var(--gpu); font-style: normal; }
+  nav a { color: #cbd5e1; text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 6px; transition: .15s; white-space: nowrap; }
+  nav a:hover { background: rgba(255,255,255,.1); color: #fff; }
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  header.hero {
+    background: linear-gradient(135deg, #0f172a 0%, #3a1c17 60%, #0f4c81 100%);
+    color: #fff; border-radius: 16px; padding: 36px 40px; margin-bottom: 28px; position: relative; overflow: hidden;
+  }
+  header.hero::after {
+    content: "Rust · C++ · Python"; position: absolute; right: 24px; top: -14px;
+    font-size: 54px; font-weight: 800; color: rgba(255,255,255,.07);
+    font-family: Consolas, monospace; line-height: 1; letter-spacing: 2px;
+  }
+  header.hero h1 { margin: 0 0 8px; font-size: 27px; }
+  header.hero p.sub { margin: 0 0 18px; color: #c7d5e6; max-width: 800px; font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 5px 14px; font-size: 12.5px; color: #e2ecf8; }
+  .chip b { color: #fff; }
+
+  section.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 26px 30px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(15,23,42,.05); }
+  section.card > h2 { margin: 0 0 6px; font-size: 21px; display: flex; align-items: center; gap: 10px; }
+  section.card > h2 .no { background: #334155; color: #fff; border-radius: 8px; font-size: 13px; padding: 3px 10px; font-weight: 700; }
+  section.card > .lead { color: var(--ink-soft); margin: 0 0 18px; font-size: 14px; }
+  h3 { margin: 26px 0 8px; font-size: 16.5px; }
+  h3 .ln { color: var(--cpp); font-family: Consolas, monospace; font-size: 12.5px; background: var(--cpp-soft); padding: 2px 8px; border-radius: 5px; margin-left: 8px; vertical-align: 2px; }
+  p, li { font-size: 14px; }
+  ul { padding-left: 22px; }
+  li { margin: 3px 0; }
+
+  pre { background: var(--code-bg); color: var(--code-ink); border-radius: 10px; padding: 16px 18px; overflow-x: auto; font-size: 13px; line-height: 1.6; font-family: "Cascadia Code", Consolas, monospace; margin: 10px 0 14px; border: 1px solid #1e293b; }
+  .tok-kw { color: #c792ea; font-weight: 600; }
+  .tok-str { color: #a5d6a7; }
+  .tok-com { color: #64748b; font-style: italic; }
+  .tok-pp { color: #f48fb1; }
+  .tok-num { color: #f78c6c; }
+
+  .note, .warn, .good { border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px; }
+  .note { background: var(--cpp-soft); border-left: 4px solid var(--cpp); }
+  .warn { background: var(--warn-soft); border-left: 4px solid var(--warn); }
+  .good { background: var(--gpu-soft); border-left: 4px solid var(--gpu); }
+  .note b, .warn b, .good b { display: block; margin-bottom: 2px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f0f4f8; font-weight: 600; white-space: nowrap; }
+  td code, .inline-code { background: #eef1f5; padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; font-size: 12.5px; color: #0f4c81; }
+  tr:hover td { background: #fafcff; }
+
+  .diagram-box { background: #fbfcfe; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 14px 0; overflow-x: auto; }
+  .diagram-box h3 { margin: 8px 4px 2px; }
+  .diagram-box .dsub { color: var(--ink-soft); font-size: 13px; margin: 0 4px 8px; }
+  svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; padding: 6px 4px 2px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  .node rect, .node polygon { transition: filter .15s, stroke-width .15s; }
+  .node:hover rect, .node:hover polygon { filter: drop-shadow(0 2px 6px rgba(15,23,42,.25)); stroke-width: 2.5px; cursor: pointer; }
+  .node .t { font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+  .node .s { font-size: 10.5px; fill: var(--ink-soft); }
+  .decision polygon { fill: var(--warn-soft); stroke: var(--warn); }
+  .decision .t { fill: var(--warn); }
+  .decision .s { fill: #b45309; }
+  .flowline { stroke: #7c8ba0; stroke-width: 1.6; fill: none; }
+  .flowline.okline { stroke: #16a34a; }
+  .flowline.dashed { stroke-dasharray: 6 4; stroke-width: 1.4; }
+  .edge-label { font-size: 11px; fill: #6b7a90; }
+  .band { fill: none; }
+  .band .bt { font-size: 12px; fill: #94a3b8; font-weight: 700; letter-spacing: 1px; }
+  .band1 { fill: #f8fafc; }
+  .band2 { fill: #fdf6f5; }
+  .band3 { fill: #f0f7fb; }
+  .band4 { fill: #f7f4fd; }
+  .bigbox rect { fill: #fff; }
+  .bigbox .t { font-size: 13px; font-weight: 700; }
+  .gateway rect { stroke: var(--rust); }
+  .gateway .t { fill: var(--rust); }
+  .core rect { stroke: var(--cpp); }
+  .core .t { fill: var(--cpp); }
+  .llama rect { stroke: var(--gpu); }
+  .llama .t { fill: #4a7a00; }
+  .python rect { stroke: var(--py); }
+  .python .t { fill: var(--py); }
+  .deploy rect { stroke: var(--dep); }
+  .deploy .t { fill: var(--dep); }
+  .client rect { stroke: #64748b; }
+  .client .t { fill: #475569; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .btop { position: fixed; right: 26px; bottom: 26px; z-index: 60; background: #334155; color: #fff; border: none; border-radius: 10px; width: 44px; height: 44px; font-size: 18px; cursor: pointer; box-shadow: 0 4px 14px rgba(15,23,42,.35); transition: .15s; }
+  .btop:hover { background: #1e293b; transform: translateY(-2px); }
+  footer { text-align: center; color: #94a3b8; font-size: 12.5px; padding: 10px 0 40px; }
+  .stepnum { font-size: 12px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">Architecture <em>Overview</em></span>
+  <a href="#panorama">全景图</a>
+  <a href="#lifecycle">请求生命周期</a>
+  <a href="#pool">Worker Pool</a>
+  <a href="#modes">双模式</a>
+  <a href="#config">配置矩阵</a>
+  <a href="#walkthrough">逐层解读</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>rust-gpu-inference-gateway — 整体架构总览</h1>
+  <p class="sub">三层架构的完整视图：<b>Rust 异步网关</b>（任务调度 + 可观测性）→ <b>推理核心</b>（C++ 原型 / llama.cpp GPU 双变体）→ <b>Python 工具链</b>（演示 / 基准 / 测试），外加本地脚本与 Docker 两套部署路径。本页 4 张逻辑图 + 逐层解读，全部自包含、离线可用。</p>
+  <div class="chips">
+    <span class="chip">语言：<b>Rust 780 行</b> · <b>C++ 547 行</b> · <b>Python 4 脚本</b></span>
+    <span class="chip">网关：<b>axum + tokio</b>，4 端点</span>
+    <span class="chip">调度：<b>有界队列 + 自适应 Worker Pool</b></span>
+    <span class="chip">核心协议：<b>infer</b> | <b>llama-chat</b></span>
+    <span class="chip">部署：<b>本地脚本</b> | <b>Docker Compose</b></span>
+    <span class="chip">可观测：<b>tracing + 无依赖 Prometheus</b></span>
+  </div>
+</header>
+
+<!-- ============ 01 全景架构图 ============ -->
+<section class="card" id="panorama">
+  <h2><span class="no">01</span>全景架构图</h2>
+  <p class="lead">四个层次：客户端 → 服务进程（Rust 网关 + 推理核心，本地 127.0.0.1 互联）→ Python 工具链 → 部署编排。彩色数字为主线数据流（请求与响应），虚线为辅助关联。</p>
+
+  <div class="legend">
+    <span><i style="background:#CE422B"></i>Rust 网关</span>
+    <span><i style="background:#00599C"></i>C++ 原型核心</span>
+    <span><i style="background:#76B900"></i>llama.cpp GPU 核心</span>
+    <span><i style="background:#3776AB"></i>Python 工具链</span>
+    <span><i style="background:#7c3aed"></i>部署编排</span>
+    <span><i style="background:#16a34a"></i>成功响应</span>
+    <span><i style="background:#d97706"></i>决策点</span>
+  </div>
+
+  <div class="diagram-box">
+    <h3>图 ① 全景架构（主图）</h3>
+    <p class="dsub">点击任一节点可跳转到 §07 对应的逐层解读章节。</p>
+    <svg viewBox="0 0 1200 858" role="img" aria-label="全景架构图">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/></marker>
+        <marker id="arG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+        <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+      </defs>
+
+      <!-- 层次带 -->
+      <rect class="band band1" x="20" y="20" width="1160" height="140" rx="12"/>
+      <text x="34" y="42" class="bt">客户端层</text>
+      <rect class="band band2" x="20" y="180" width="1160" height="370" rx="12"/>
+      <text x="34" y="202" class="bt">服务进程层（127.0.0.1 本地互联）</text>
+      <rect class="band band3" x="20" y="570" width="1160" height="120" rx="12"/>
+      <text x="34" y="592" class="bt">Python 工具链层</text>
+      <rect class="band band4" x="20" y="710" width="1160" height="130" rx="12"/>
+      <text x="34" y="732" class="bt">部署编排层</text>
+
+      <!-- 客户端 -->
+      <g class="node client" data-sec="sec-client">
+        <rect x="60" y="60" width="300" height="76" rx="12" fill="#fff" stroke="#64748b" stroke-width="2"/>
+        <text x="210" y="88" text-anchor="middle" class="t" font-size="14">客户端</text>
+        <text x="210" y="108" text-anchor="middle" class="s">curl / PowerShell Invoke-RestMethod</text>
+        <text x="210" y="125" text-anchor="middle" class="s">python demo/client.py · benchmark.py</text>
+      </g>
+
+      <!-- 主链路 ① ④ -->
+      <path class="flowline" d="M210,136 L210,165 L300,165 L300,210" marker-end="url(#ar)"/>
+      <text x="255" y="157" text-anchor="middle" class="edge-label" font-weight="700">① POST /infer</text>
+      <path class="flowline okline" d="M450,210 L450,185 L210,185 L210,136" marker-end="url(#arG)"/>
+      <text x="330" y="177" text-anchor="middle" class="edge-label" fill="#16a34a" font-weight="700">④ 200 响应（request_id 透传）</text>
+
+      <!-- Rust 网关 -->
+      <g class="node bigbox gateway" data-sec="sec-gateway">
+        <rect x="60" y="210" width="500" height="310" rx="14" fill="#fff" stroke="#CE422B" stroke-width="2.5"/>
+        <text x="310" y="240" text-anchor="middle" class="t" font-size="14">Rust 网关进程 · 127.0.0.1:8080</text>
+        <text x="310" y="258" text-anchor="middle" class="s">axum 0.7 + tokio · src/main.rs (780 行)</text>
+      </g>
+      <g class="node" data-sec="sec-gateway">
+        <rect x="80" y="272" width="220" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="190" y="294" text-anchor="middle" class="t">axum Router（4 路由）</text>
+        <text x="190" y="311" text-anchor="middle" class="s">/health /metrics /models /infer</text>
+        <text x="190" y="326" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">Handler + Extension(AppState)</text>
+      </g>
+      <g class="node" data-sec="sec-queue">
+        <rect x="330" y="272" width="210" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="435" y="294" text-anchor="middle" class="t">任务队列 bounded mpsc</text>
+        <text x="435" y="311" text-anchor="middle" class="s">QUEUE_CAPACITY=100</text>
+        <text x="435" y="326" text-anchor="middle" class="s" font-size="9.5" fill="#dc2626">满 → try_send 失败 → 503 queue_full</text>
+      </g>
+      <g class="node" data-sec="sec-pool">
+        <rect x="330" y="356" width="210" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="435" y="378" text-anchor="middle" class="t">AdaptiveWorkerPool</text>
+        <text x="435" y="395" text-anchor="middle" class="s">MIN_CONCURRENCY=1 → MAX=4</text>
+        <text x="435" y="410" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">信号量 + 按队列深度伸缩</text>
+      </g>
+      <g class="node" data-sec="sec-metrics">
+        <rect x="80" y="356" width="220" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="190" y="378" text-anchor="middle" class="t">Metrics（零依赖 Prometheus）</text>
+        <text x="190" y="395" text-anchor="middle" class="s">原子计数器 + 直方图</text>
+        <text x="190" y="410" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">GET /metrics · 文本 0.0.4 格式</text>
+      </g>
+      <g class="node" data-sec="sec-registry">
+        <rect x="80" y="440" width="220" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="190" y="462" text-anchor="middle" class="t">ModelRegistry（RwLock）</text>
+        <text x="190" y="479" text-anchor="middle" class="s">infer 模式：静态快照</text>
+        <text x="190" y="494" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">llama-chat：定时同步 /v1/models</text>
+      </g>
+      <g class="node" data-sec="sec-proxy">
+        <rect x="330" y="440" width="210" height="62" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="435" y="462" text-anchor="middle" class="t">reqwest::Client（共享）</text>
+        <text x="435" y="479" text-anchor="middle" class="s">调用推理核心的 HTTP 客户端</text>
+        <text x="435" y="494" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">rustls TLS · 连接复用</text>
+      </g>
+      <!-- 网关内部箭头 -->
+      <path class="flowline" d="M300,303 L330,303" marker-end="url(#ar)"/>
+      <path class="flowline" d="M435,334 L435,356" marker-end="url(#ar)"/>
+      <path class="flowline" d="M435,418 L435,440" marker-end="url(#ar)"/>
+      <path class="flowline dashed" d="M190,334 L190,356" marker-end="url(#arD)"/>
+      <path class="flowline dashed" d="M190,418 L190,440" marker-end="url(#arD)"/>
+      <path class="flowline dashed" d="M300,471 L330,471" marker-end="url(#arD)"/>
+      <text x="205" y="380" text-anchor="middle" class="edge-label" font-size="9.5">记录指标</text>
+
+      <!-- 推理核心区 -->
+      <g class="node bigbox core" data-sec="sec-core">
+        <rect x="600" y="210" width="540" height="310" rx="14" fill="#fff" stroke="#00599C" stroke-width="2.5"/>
+        <text x="870" y="240" text-anchor="middle" class="t" font-size="14">推理核心 · 127.0.0.1:8081（二选一）</text>
+        <text x="870" y="258" text-anchor="middle" class="s">由网关 CORE_PROTOCOL 环境变量选择</text>
+      </g>
+      <g class="node decision" data-sec="sec-modes">
+        <polygon points="870,270 1010,292 870,314 730,292"/>
+        <text x="870" y="290" text-anchor="middle" class="t" font-size="12">CORE_PROTOCOL ?</text>
+        <text x="870" y="305" text-anchor="middle" class="s" font-size="9.5">infer | llama-chat</text>
+      </g>
+      <path class="flowline" d="M540,472 L600,472 L600,292 L730,292" marker-end="url(#ar)"/>
+      <text x="548" y="300" text-anchor="middle" class="edge-label" font-weight="700">② 请求</text>
+      <text x="500" y="465" text-anchor="middle" class="edge-label" font-size="9.5">POST /infer 或 /v1/chat/completions</text>
+      <path class="flowline okline" d="M870,314 L870,420 L540,420 L540,455" marker-end="url(#arG)"/>
+      <text x="560" y="432" text-anchor="middle" class="edge-label" fill="#16a34a" font-weight="700">③ JSON 结果</text>
+
+      <!-- C++ 原型 -->
+      <g class="node core" data-sec="sec-cpp">
+        <rect x="620" y="330" width="230" height="80" rx="10" fill="#fff" stroke="#00599C"/>
+        <text x="735" y="352" text-anchor="middle" class="t">C++ 原型 core</text>
+        <text x="735" y="370" text-anchor="middle" class="s">GET /health · POST /infer</text>
+        <text x="735" y="386" text-anchor="middle" class="s">手写 Socket · 零依赖 · 547 行</text>
+        <text x="735" y="401" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">infer 协议：InferRequest/InferResponse</text>
+      </g>
+      <g class="node llama" data-sec="sec-llama">
+        <rect x="900" y="330" width="230" height="80" rx="10" fill="#fff" stroke="#76B900"/>
+        <text x="1015" y="352" text-anchor="middle" class="t">llama-server（GPU 生产）</text>
+        <text x="1015" y="370" text-anchor="middle" class="s">/v1/chat/completions · /v1/models</text>
+        <text x="1015" y="386" text-anchor="middle" class="s">llama.cpp + CUDA · OpenAI 兼容</text>
+        <text x="1015" y="401" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">多模型路由：LLAMA_MODELS_DIR</text>
+      </g>
+      <path class="flowline" d="M770,298 L770,330" marker-end="url(#ar)"/>
+      <text x="762" y="322" text-anchor="middle" class="edge-label" font-size="9.5">infer</text>
+      <path class="flowline" d="M1010,292 L1015,292 L1015,330" marker-end="url(#ar)"/>
+      <text x="1015" y="284" text-anchor="middle" class="edge-label" font-size="9.5">llama-chat</text>
+      <g class="node core" data-sec="sec-cpp">
+        <rect x="620" y="440" width="230" height="52" rx="9" fill="#fff" stroke="#00599C"/>
+        <text x="735" y="462" text-anchor="middle" class="t">CPU 变换 / CUDA kernel</text>
+        <text x="735" y="479" text-anchor="middle" class="s">__CUDACC__ 编译期双路径</text>
+      </g>
+      <g class="node llama" data-sec="sec-llama">
+        <rect x="900" y="440" width="230" height="52" rx="9" fill="#fff" stroke="#76B900"/>
+        <text x="1015" y="462" text-anchor="middle" class="t">加载 models/*.gguf</text>
+        <text x="1015" y="479" text-anchor="middle" class="s">GPU offload（-ngl 99）</text>
+      </g>
+      <path class="flowline" d="M735,410 L735,440" marker-end="url(#ar)"/>
+      <path class="flowline" d="M1015,410 L1015,440" marker-end="url(#ar)"/>
+      <text x="747" y="430" text-anchor="middle" class="edge-label" font-size="9.5">CPU 回退</text>
+
+      <!-- Python 工具链 -->
+      <g class="node python" data-sec="sec-python">
+        <rect x="60" y="600" width="200" height="56" rx="9" fill="#fff" stroke="#3776AB"/>
+        <text x="160" y="621" text-anchor="middle" class="t">demo/client.py</text>
+        <text x="160" y="638" text-anchor="middle" class="s">--model --input 演示请求</text>
+        <text x="160" y="651" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">httpx 打印 JSON 响应</text>
+      </g>
+      <g class="node python" data-sec="sec-python">
+        <rect x="290" y="600" width="200" height="56" rx="9" fill="#fff" stroke="#3776AB"/>
+        <text x="390" y="621" text-anchor="middle" class="t">benchmark/benchmark.py</text>
+        <text x="390" y="638" text-anchor="middle" class="s">10 次循环测端到端延迟</text>
+        <text x="390" y="651" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">perf_counter → 平均 ms</text>
+      </g>
+      <g class="node python" data-sec="sec-python">
+        <rect x="520" y="600" width="200" height="56" rx="9" fill="#fff" stroke="#3776AB"/>
+        <text x="620" y="621" text-anchor="middle" class="t">tests/test_end_to_end.py</text>
+        <text x="620" y="638" text-anchor="middle" class="s">pytest 端到端断言</text>
+        <text x="620" y="651" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">trust_env=False 防代理干扰</text>
+      </g>
+      <g class="node python" data-sec="sec-python">
+        <rect x="750" y="600" width="200" height="56" rx="9" fill="#fff" stroke="#3776AB"/>
+        <text x="850" y="621" text-anchor="middle" class="t">tools/generate_input.py</text>
+        <text x="850" y="638" text-anchor="middle" class="s">生成示例请求 JSON</text>
+        <text x="850" y="651" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">模型准备/调试辅助</text>
+      </g>
+      <g class="node" data-sec="sec-python">
+        <rect x="1000" y="600" width="160" height="56" rx="9" fill="#fff" stroke="#94a3b8"/>
+        <text x="1080" y="621" text-anchor="middle" class="t" font-size="11.5">统一入口</text>
+        <text x="1080" y="638" text-anchor="middle" class="s">httpx → :8080/infer</text>
+        <text x="1080" y="651" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">全部走 Rust 网关</text>
+      </g>
+      <path class="flowline dashed" d="M210,600 L210,520" marker-end="url(#arD)"/>
+      <text x="222" y="578" class="edge-label" font-size="9.5">请求/基准流量</text>
+
+      <!-- 部署层 -->
+      <g class="node deploy" data-sec="sec-deploy">
+        <rect x="60" y="750" width="250" height="60" rx="9" fill="#fff" stroke="#7c3aed"/>
+        <text x="185" y="772" text-anchor="middle" class="t">scripts/start-dev.sh</text>
+        <text x="185" y="789" text-anchor="middle" class="s">C++ core + 网关 · 健康等待 · 失败回滚</text>
+        <text x="185" y="804" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">stop-dev.sh 按 PID 文件清理</text>
+      </g>
+      <g class="node deploy" data-sec="sec-deploy">
+        <rect x="340" y="750" width="250" height="60" rx="9" fill="#fff" stroke="#7c3aed"/>
+        <text x="465" y="772" text-anchor="middle" class="t">start-llama-server.sh/.ps1</text>
+        <text x="465" y="789" text-anchor="middle" class="s">单模型 --model / 路由 LLAMA_MODELS_DIR</text>
+        <text x="465" y="804" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">--gpu-layers 99 · 120s 健康等待</text>
+      </g>
+      <g class="node deploy" data-sec="sec-deploy">
+        <rect x="620" y="750" width="250" height="60" rx="9" fill="#fff" stroke="#7c3aed"/>
+        <text x="745" y="772" text-anchor="middle" class="t">deploy/docker-compose.yml</text>
+        <text x="745" y="789" text-anchor="middle" class="s">gateway + inference_core 两服务</text>
+        <text x="745" y="804" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">healthcheck + depends_on 条件</text>
+      </g>
+      <g class="node deploy" data-sec="sec-deploy">
+        <rect x="900" y="750" width="260" height="60" rx="9" fill="#fff" stroke="#7c3aed"/>
+        <text x="1030" y="772" text-anchor="middle" class="t">多阶段 Dockerfile ×2</text>
+        <text x="1030" y="789" text-anchor="middle" class="s">rust:1.81 / gcc:13 构建 → slim 运行</text>
+        <text x="1030" y="804" text-anchor="middle" class="s" font-size="9.5" fill="#94a3b8">CORE_URL=http://inference_core:8081</text>
+      </g>
+      <path class="flowline dashed" d="M185,750 L185,520" marker-end="url(#arD)"/>
+      <text x="128" y="640" class="edge-label" font-size="9.5">启动/停止</text>
+      <path class="flowline dashed" d="M520,750 L870,520" marker-end="url(#arD)"/>
+      <text x="560" y="700" class="edge-label" font-size="9.5">GPU 模式（替代 C++ 原型）</text>
+      <path class="flowline dashed" d="M745,750 L745,520" marker-end="url(#arD)"/>
+      <text x="757" y="648" class="edge-label" font-size="9.5">容器化</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ 02 请求生命周期 ============ -->
+<section class="card" id="lifecycle">
+  <h2><span class="no">02</span>请求生命周期（7 步时序）</h2>
+  <p class="lead">一次 POST /infer 从客户端到推理核心再返回的完整旅程。背压（503）、超时（504）、指标采集都发生在这些步骤中。</p>
+
+  <div class="diagram-box">
+    <svg viewBox="0 0 1200 720" role="img" aria-label="请求生命周期时序图">
+      <defs>
+        <marker id="arl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/></marker>
+        <marker id="arlG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+      </defs>
+
+      <!-- 泳道头 -->
+      <rect x="30" y="20" width="200" height="46" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+      <text x="130" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#475569">客户端</text>
+      <rect x="260" y="20" width="220" height="46" rx="8" fill="#fdeeea" stroke="#CE422B"/>
+      <text x="370" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#CE422B">网关 HTTP 层</text>
+      <rect x="510" y="20" width="200" height="46" rx="8" fill="#fdeeea" stroke="#CE422B"/>
+      <text x="610" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#CE422B">队列 · 调度器</text>
+      <rect x="740" y="20" width="200" height="46" rx="8" fill="#fdeeea" stroke="#CE422B"/>
+      <text x="840" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#CE422B">Worker 任务</text>
+      <rect x="970" y="20" width="200" height="46" rx="8" fill="#e8f1f9" stroke="#00599C"/>
+      <text x="1070" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#00599C">推理核心</text>
+
+      <!-- 1 -->
+      <circle cx="130" cy="120" r="13" fill="#334155"/>
+      <text x="130" y="125" text-anchor="middle" class="stepnum" fill="#fff">1</text>
+      <path class="flowline" d="M220,160 L300,160" marker-end="url(#arl)"/>
+      <text x="260" y="152" text-anchor="middle" class="edge-label" font-weight="700">POST /infer {model,input,options}</text>
+
+      <!-- 2：网关内校验 -->
+      <circle cx="370" cy="210" r="13" fill="#334155"/>
+      <text x="370" y="215" text-anchor="middle" class="stepnum" fill="#fff">2</text>
+      <g class="node" data-sec="sec-gateway">
+        <rect x="280" y="235" width="180" height="52" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="370" y="256" text-anchor="middle" class="t" font-size="11.5">校验模型 → UUID request_id</text>
+        <text x="370" y="273" text-anchor="middle" class="s" font-size="10">建 oneshot 通道 + tracing span</text>
+      </g>
+      <path class="flowline" d="M370,287 L370,305 L300,305 L300,287" marker-end="url(#arl)" style="stroke-dasharray:4 3"/>
+
+      <!-- 3：入队 -->
+      <circle cx="610" cy="210" r="13" fill="#334155"/>
+      <text x="610" y="215" text-anchor="middle" class="stepnum" fill="#fff">3</text>
+      <path class="flowline" d="M460,261 L510,261 L510,345" marker-end="url(#arl)"/>
+      <text x="485" y="253" text-anchor="middle" class="edge-label" font-weight="700">try_send(Job)</text>
+      <g class="node" data-sec="sec-queue">
+        <rect x="510" y="345" width="200" height="52" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="610" y="366" text-anchor="middle" class="t" font-size="11.5">有界队列（容量 100）</text>
+        <text x="610" y="383" text-anchor="middle" class="s" font-size="10" fill="#dc2626">满 → 503 {"status":"queue_full"}</text>
+      </g>
+
+      <!-- 4：调度 -->
+      <circle cx="610" cy="470" r="13" fill="#334155"/>
+      <text x="610" y="475" text-anchor="middle" class="stepnum" fill="#fff">4</text>
+      <path class="flowline" d="M610,397 L610,445" marker-end="url(#arl)"/>
+      <g class="node" data-sec="sec-pool">
+        <rect x="510" y="445" width="200" height="52" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="610" y="466" text-anchor="middle" class="t" font-size="11.5">dispatcher_loop</text>
+        <text x="610" y="483" text-anchor="middle" class="s" font-size="10">reconfigure(队列长度) → acquire()</text>
+      </g>
+
+      <!-- 5：调用核心 -->
+      <circle cx="840" cy="470" r="13" fill="#334155"/>
+      <text x="840" y="475" text-anchor="middle" class="stepnum" fill="#fff">5</text>
+      <path class="flowline" d="M710,471 L740,471" marker-end="url(#arl)"/>
+      <text x="725" y="462" text-anchor="middle" class="edge-label" font-weight="700">call_inference_core()</text>
+      <g class="node" data-sec="sec-proxy">
+        <rect x="740" y="445" width="200" height="52" rx="9" fill="#fff" stroke="#CE422B"/>
+        <text x="840" y="466" text-anchor="middle" class="t" font-size="11.5">reqwest 调用（带超时）</text>
+        <text x="840" y="483" text-anchor="middle" class="s" font-size="10">infer | llama-chat 协议分派</text>
+      </g>
+      <path class="flowline" d="M940,471 L1000,471" marker-end="url(#arl)"/>
+      <text x="970" y="462" text-anchor="middle" class="edge-label" font-weight="700">HTTP</text>
+
+      <!-- 6：核心执行 -->
+      <circle cx="1070" cy="560" r="13" fill="#334155"/>
+      <text x="1070" y="565" text-anchor="middle" class="stepnum" fill="#fff">6</text>
+      <g class="node" data-sec="sec-core">
+        <rect x="970" y="510" width="200" height="70" rx="9" fill="#fff" stroke="#00599C"/>
+        <text x="1070" y="532" text-anchor="middle" class="t" font-size="11.5">执行推理</text>
+        <text x="1070" y="549" text-anchor="middle" class="s" font-size="10">CPU 变换 / CUDA kernel</text>
+        <text x="1070" y="564" text-anchor="middle" class="s" font-size="10">或 llama.cpp GPU 生成</text>
+      </g>
+      <path class="flowline dashed" d="M1070,580 L1070,600" style="stroke-dasharray:4 3"/>
+
+      <!-- 7：返回 -->
+      <circle cx="840" cy="650" r="13" fill="#16a34a"/>
+      <text x="840" y="655" text-anchor="middle" class="stepnum" fill="#fff">7</text>
+      <path class="flowline okline" d="M1070,600 L1070,630 L840,630" marker-end="url(#arlG)"/>
+      <path class="flowline okline" d="M840,630 L840,600 L370,600 L370,370 L300,370 L300,175" marker-end="url(#arlG)"/>
+      <text x="620" y="622" text-anchor="middle" class="edge-label" fill="#16a34a" font-weight="700">③ 结果 JSON → oneshot 回传 → 200（finish_request 记录延迟与结果）</text>
+
+      <!-- 底部超时说明 -->
+      <rect x="60" y="668" width="1080" height="40" rx="8" fill="#fdf3e3" stroke="#d97706"/>
+      <text x="600" y="693" text-anchor="middle" font-size="12" fill="#92400e">超时分支：REQUEST_TIMEOUT_SECS 内未收到 worker 结果 → 504 {"status":"timeout"}（finish_request(Timeout)）</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ 03 自适应 Worker Pool ============ -->
+<section class="card" id="pool">
+  <h2><span class="no">03</span>自适应 Worker Pool 机制（src/worker_pool.rs）</h2>
+  <p class="lead">并发度不是固定值，而是随队列积压动态伸缩：队列越深、派发越多的并发 worker；空闲时自动回落。这是本仓库最"有设计含量"的调度机制。</p>
+
+  <div class="diagram-box">
+    <h3>图 ③ 伸缩策略与三种状态</h3>
+    <p class="dsub">默认配置：MIN_CONCURRENCY=1，MAX_CONCURRENCY=4。调度器每派发一个任务就重算一次。</p>
+    <svg viewBox="0 0 1000 520" role="img" aria-label="Worker Pool 伸缩策略图">
+      <defs>
+        <marker id="arp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c8ba0"/></marker>
+      </defs>
+
+      <!-- 策略公式 -->
+      <g class="node" data-sec="sec-pool">
+        <rect x="150" y="20" width="700" height="64" rx="10" fill="#fdf3e3" stroke="#d97706" stroke-width="2"/>
+        <text x="500" y="44" text-anchor="middle" class="t" font-size="13">伸缩策略（plan 函数）</text>
+        <text x="500" y="63" text-anchor="middle" class="s" font-size="11.5">desired = min_workers + queue_len / 2　→　clamp(min_workers, max_workers)</text>
+        <text x="500" y="78" text-anchor="middle" class="s" font-size="10.5">含义：队列每多 2 个待处理任务，就多开 1 个并发 worker，直到上限</text>
+      </g>
+
+      <!-- 状态 1：空闲 -->
+      <g class="node" data-sec="sec-pool">
+        <rect x="60" y="130" width="280" height="120" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="200" y="155" text-anchor="middle" class="t" font-size="13">状态 A · 空闲</text>
+        <text x="200" y="175" text-anchor="middle" class="s">queue_len = 0</text>
+        <text x="200" y="193" text-anchor="middle" class="s" font-weight="700">pool = 1（MIN）</text>
+        <text x="200" y="211" text-anchor="middle" class="s" font-size="10">请求进来秒派发，不排队</text>
+      </g>
+      <g class="node" data-sec="sec-pool">
+        <rect x="360" y="130" width="280" height="120" rx="10" fill="#fff" stroke="#d97706" stroke-width="2"/>
+        <text x="500" y="155" text-anchor="middle" class="t" font-size="13">状态 B · 积压</text>
+        <text x="500" y="175" text-anchor="middle" class="s">queue_len = 6</text>
+        <text x="500" y="193" text-anchor="middle" class="s" font-weight="700">pool = 1 + 6/2 = 4（MAX）</text>
+        <text x="500" y="211" text-anchor="middle" class="s" font-size="10">add_permits 增发并发额度</text>
+      </g>
+      <g class="node" data-sec="sec-pool">
+        <rect x="660" y="130" width="280" height="120" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="800" y="155" text-anchor="middle" class="t" font-size="13">状态 C · 回落</text>
+        <text x="800" y="175" text-anchor="middle" class="s">queue_len → 0（积压消化）</text>
+        <text x="800" y="193" text-anchor="middle" class="s" font-weight="700">pool = 1（MIN）</text>
+        <text x="800" y="211" text-anchor="middle" class="s" font-size="10">forget_permits 回收额度</text>
+      </g>
+      <path class="flowline" d="M340,190 L360,190" marker-end="url(#arp)"/>
+      <text x="350" y="182" text-anchor="middle" class="edge-label">排队加深</text>
+      <path class="flowline" d="M640,190 L660,190" marker-end="url(#arp)"/>
+      <text x="650" y="182" text-anchor="middle" class="edge-label">积压清空</text>
+
+      <!-- 机制说明 -->
+      <g class="node" data-sec="sec-pool">
+        <rect x="150" y="290" width="700" height="120" rx="10" fill="#fdeeea" stroke="#CE422B"/>
+        <text x="500" y="314" text-anchor="middle" class="t" font-size="13">实现机制（AdaptiveWorkerPool = tokio Semaphore 包装）</text>
+        <text x="200" y="340" text-anchor="middle" class="s" font-size="11">• reconfigure(): 按队列长度计算目标值，</text>
+        <text x="200" y="357" text-anchor="middle" class="s" font-size="11">  用 CAS 循环与 current 比较，加/减信号量许可</text>
+        <text x="200" y="374" text-anchor="middle" class="s" font-size="11">• acquire(): 取一个 OwnedSemaphorePermit，</text>
+        <text x="200" y="391" text-anchor="middle" class="s" font-size="11">  没有额度就等待（隐式背压）</text>
+        <text x="530" y="340" text-anchor="middle" class="s" font-size="11">• 缩容不打断运行中的 worker：</text>
+        <text x="530" y="357" text-anchor="middle" class="s" font-size="11">  forget_permits 只减少未来的并发额度，</text>
+        <text x="530" y="374" text-anchor="middle" class="s" font-size="11">  已持有的 permit 允许跑完</text>
+        <text x="530" y="391" text-anchor="middle" class="s" font-size="11">• 所有原子计数为 Relaxed（伸缩决策不要求精确）</text>
+      </g>
+
+      <!-- 观测 -->
+      <g class="node" data-sec="sec-metrics">
+        <rect x="150" y="440" width="700" height="52" rx="10" fill="#fff" stroke="#94a3b8"/>
+        <text x="500" y="463" text-anchor="middle" class="t" font-size="12.5">可观测性：每次伸缩都更新指标 → /metrics 实时可见</text>
+        <text x="500" y="481" text-anchor="middle" class="s">inference_worker_pool_size{当前} · inference_worker_pool_max{上限}（gauge）</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ 04 双模式对照 ============ -->
+<section class="card" id="modes">
+  <h2><span class="no">04</span>双运行模式对照：infer vs llama-chat</h2>
+  <p class="lead">同一套网关代码通过 <span class="inline-code">CORE_PROTOCOL</span> 环境变量切换后端，是"原型可跑通 + 生产可升级"设计的关键。</p>
+  <table>
+    <tr><th>维度</th><th>infer（默认 / CPU 模式）</th><th>llama-chat（GPU 生产模式）</th></tr>
+    <tr><td>后端服务</td><td>C++ 原型 core（cpp_inference/inference_core.cpp）</td><td>llama-server（llama.cpp + CUDA）</td></tr>
+    <tr><td>网关调用端点</td><td><code>POST {core}/infer</code>（自定义线格式）</td><td><code>POST {core}/v1/chat/completions</code>（OpenAI 兼容）</td></tr>
+    <tr><td>响应解析</td><td>反序列化 InferResponse（字段直接对应）</td><td>解析 <code>choices[0].message.content</code> + usage + timings</td></tr>
+    <tr><td>延迟/Token 来源</td><td>core 返回（原型写死 5ms 假数据）</td><td>llama-server 真实 <code>timings.predicted_ms</code> / usage</td></tr>
+    <tr><td>模型注册表</td><td>静态快照（qwen2.5-0.5b + llama-7b/13b + mistral-7b）</td><td>动态同步：<code>GET /v1/models</code> 每 REGISTRY_REFRESH_SECS 拉取（含 alias 校验）</td></tr>
+    <tr><td>多模型</td><td>否（单一原型）</td><td>是（LLAMA_MODELS_DIR 路由模式，子进程懒加载）</td></tr>
+    <tr><td>适用场景</td><td>CI / Docker CPU 镜像 / 教学演示 / 无 GPU 环境</td><td>真实 GPU 推理、多模型服务</td></tr>
+    <tr><td>协议别名</td><td>其它任何值均回退到 infer</td><td><code>llama-chat</code> / <code>llama</code> / <code>openai</code> 均触发</td></tr>
+  </table>
+  <div class="note"><b>CoreProtocol 枚举（main.rs 131-159）</b>网关把"后端差异"收敛为协议选择 + 两条调用函数（call_infer_protocol / call_llama_chat_protocol），Handler、队列、调度、指标完全不受影响 —— 这是本仓库抽象做得最干净的一处。</div>
+</section>
+
+<!-- ============ 05 配置矩阵 ============ -->
+<section class="card" id="config">
+  <h2><span class="no">05</span>配置矩阵（环境变量）</h2>
+  <p class="lead">全部配置走环境变量，同一二进制适配本地 / Docker / CI 三种环境（src/main.rs Config::from_env，161-225 行）。</p>
+  <table>
+    <tr><th>变量</th><th>默认值</th><th>作用</th></tr>
+    <tr><td><code>BIND_ADDR</code> / <code>PORT</code></td><td><code>127.0.0.1:8080</code></td><td>网关监听地址；Dockerfile 覆盖为 <code>0.0.0.0:8080</code></td></tr>
+    <tr><td><code>CORE_URL</code></td><td><code>http://127.0.0.1:8081</code></td><td>推理核心地址；Compose 中为 <code>http://inference_core:8081</code></td></tr>
+    <tr><td><code>CORE_PROTOCOL</code></td><td><code>infer</code></td><td>infer | llama-chat | llama | openai（见 §04）</td></tr>
+    <tr><td><code>MIN_CONCURRENCY</code></td><td><code>1</code></td><td>Worker Pool 下限（恒 ≥1，且 clamp ≤ MAX）</td></tr>
+    <tr><td><code>MAX_CONCURRENCY</code></td><td><code>4</code></td><td>Worker Pool 上限（恒 ≥1）</td></tr>
+    <tr><td><code>QUEUE_CAPACITY</code></td><td><code>100</code></td><td>有界任务队列长度；满 → 503</td></tr>
+    <tr><td><code>REQUEST_TIMEOUT_SECS</code></td><td><code>10</code></td><td>等待 worker 结果上限；超时 → 504</td></tr>
+    <tr><td><code>REGISTRY_REFRESH_SECS</code></td><td><code>30</code></td><td>llama-chat 模式模型注册表同步周期</td></tr>
+    <tr><td><code>RUST_LOG</code></td><td>（空）</td><td>tracing 过滤级别（tracing_subscriber EnvFilter）</td></tr>
+  </table>
+  <div class="good"><b>健壮性细节</b>所有数值型变量都经 parse_env_usize/parse_env_u64 校验：解析失败或 ≤0 时告警并回退默认值，绝不让配置错误拖垮进程启动（main.rs 201-225）。</div>
+</section>
+
+<!-- ============ 06 目录结构 ============ -->
+<section class="card" id="tree">
+  <h2><span class="no">06</span>目录结构（含代码规模）</h2>
+  <pre><code class="plain">rust-gpu-inference-gateway/
+├── Cargo.toml                        # tokio / axum 0.7 / serde / tracing / reqwest / uuid
+├── src/                              # ── Rust 网关 ──
+│   ├── main.rs            (780 行)   # 入口 · 路由 · 调度循环 · 双协议调用 · 注册表同步
+│   ├── worker_pool.rs     (157 行)   # 自适应 Worker Pool（信号量 + 队列深度伸缩）
+│   ├── metrics.rs         (215 行)   # 零依赖 Prometheus 指标（原子计数器 + 直方图）
+│   └── models.rs          (129 行)   # 模型注册表（静态快照 / 动态同步 + 别名）
+├── cpp_inference/                    # ── C++ 推理核心 ──
+│   ├── inference_core.cpp (547 行)   # 手写 Socket HTTP 服务 · /health /infer · CPU/CUDA 双路径
+│   ├── build.sh                     # nvcc → g++ → clang++ 自动选编译器
+│   ├── run_core.sh                  # 前台运行 --port 8081
+│   └── Dockerfile                    # gcc:13 构建 → debian-slim 运行（CPU 回退镜像）
+├── python/                           # ── Python 工具链 ──
+│   ├── demo/client.py                # httpx 演示客户端
+│   ├── benchmark/benchmark.py        # 10 轮延迟基准
+│   ├── tests/test_end_to_end.py      # pytest 端到端断言
+│   ├── tools/generate_input.py       # 示例请求生成
+│   └── requirements.txt              # httpx, pytest
+├── scripts/                          # ── 编排脚本 ──
+│   ├── start-dev.sh                  # 构建+启动 core/网关 · 健康等待 · 失败回滚
+│   ├── stop-dev.sh                   # 按 .dev/*.pid 停止
+│   └── start-llama-server.sh/.ps1    # GPU 模式：单模型 / LLAMA_MODELS_DIR 路由
+├── deploy/
+│   ├── docker-compose.yml            # gateway + inference_core（healthcheck + depends_on）
+│   └── Dockerfile.gateway            # rust:1.81 构建 → slim 运行
+├── docs/                             # api.md / architecture.md / run.md / tasks.md
+├── models/                           # GGUF 模型文件（qwen2.5-0.5b-instruct-q4_k_m.gguf）
+└── .dev/                             # 运行时 PID/日志（脚本生成，已 gitignore）</code></pre>
+</section>
+
+<!-- ============ 07 逐层解读 ============ -->
+<section class="card" id="walkthrough">
+  <h2><span class="no">07</span>逐层详细解读</h2>
+  <p class="lead">按上图 6 个关键组件逐一展开：职责、实现要点、与其他层的关系。</p>
+
+  <h3 id="sec-client">7.1 客户端与请求入口</h3>
+  <ul>
+    <li><b>请求形状</b>：<code>POST /infer</code>，body = <code>{model, input, options{max_tokens, temperature, top_p}, request_id?}</code>（InferRequest，main.rs 41-48）。<code>request_id</code> 可省略，网关会补 UUID。</li>
+    <li><b>三种客户端</b>：curl / PowerShell（README 示例）；Python demo client（httpx）；benchmark 脚本。全部打向 <code>127.0.0.1:8080</code>（网关），从不直连核心 —— 网关是唯一入口。</li>
+    <li><b>模型校验前置</b>：handler 第一步查注册表，未知模型直接 400（不浪费队列与核心资源），并计入 <code>inference_responses_total{status="invalid_request"}</code>。</li>
+  </ul>
+
+  <h3 id="sec-gateway">7.2 Rust 网关核心（src/main.rs）</h3>
+  <ul>
+    <li><b>启动装配</b>（main，230-334）：tracing 初始化 → Config::from_env → 建有界 mpsc 队列 → 建共享 reqwest Client → Metrics/ModelRegistry → AdaptiveWorkerPool → spawn dispatcher_loop（后台常驻）→ llama-chat 模式额外 spawn registry_sync_loop → axum Router 4 路由 → serve。</li>
+    <li><b>infer_handler 六步</b>（419-503）：① 校验模型；② 生成 UUID 并 stamp + 开 tracing span；③ 建 oneshot 通道；④ <code>try_send</code> 入队（失败 → 503 queue_full）；⑤ <code>tokio::time::timeout</code> 等待；⑥ 按结果分支：成功 200 / 核心报错 500 / worker 取消 500 / 超时 504。每分支都调 <code>finish_request</code> 落指标。</li>
+    <li><b>dispatcher_loop</b>（345-381）：队列消费方。每取一个 Job：<code>pool.reconfigure(queue_len)</code> 伸缩 → <code>pool.acquire()</code> 等许可 → spawn 异步 worker（调核心 + oneshot 回传 + drop permit）。并发度 = 池大小，天然限流。</li>
+    <li><b>双协议调用</b>（514-628）：<code>call_inference_core</code> 按 CoreProtocol 分派；infer 协议反序列化 InferResponse；llama-chat 协议组装 OpenAI chat body、解析 choices/usage/timings，把真实延迟写进 usage.latency_ms。</li>
+  </ul>
+
+  <h3 id="sec-pool">7.3 自适应 Worker Pool（src/worker_pool.rs，157 行）</h3>
+  <ul>
+    <li>结构：<code>Semaphore</code>（并发许可）+ <code>current/min/max</code> 原子计数。构造时 clamp（min ≥1 且 ≤ max）。</li>
+    <li><code>reconfigure(queue_len)</code>：目标值 = min + queue_len/2 并 clamp；比 current 大 → <code>add_permits</code>，小 → <code>forget_permits</code>；用 CAS 循环防止并发重算竞态（只影响伸缩精度，不影响正确性）。</li>
+    <li><code>acquire()</code>：取 OwnedSemaphorePermit，取不到就 await —— 这就是"超并发时 worker 自然排队"的背压实现。</li>
+    <li><b>不打断在途任务</b>：缩容只回收"未来的许可"，运行中的 worker 持有 permit 照常跑完，优雅降级。</li>
+    <li>自带 6 个单元测试（起始值 / clamp / 伸缩 / 上限 / 许可一致性），覆盖核心行为 —— 全仓唯一的测试模块。</li>
+  </ul>
+
+  <h3 id="sec-metrics">7.4 指标系统（src/metrics.rs，215 行）</h3>
+  <ul>
+    <li><b>零依赖</b>：计数器用 AtomicU64，直方图用 Mutex&lt;[u64;9]&gt;，render() 直接拼 Prometheus 文本格式（0.0.4），无需 prometheus crate —— 注释明确说明生产可换正式库。</li>
+    <li>指标族：<code>inference_requests_total</code>（接受数）、<code>inference_requests_in_flight</code>（在途）、<code>inference_worker_pool_size/max</code>（池伸缩，由调度器更新）、<code>inference_responses_total{status=ok|error|timeout|queue_full|invalid_request}</code>、延迟 sum/count/bucket（1..1000ms 9 桶 + +Inf）。</li>
+    <li>桶写入用"小于等于则逐桶 +1"的朴素累计（O(9) 每请求），换取无锁直方图。</li>
+  </ul>
+
+  <h3 id="sec-registry">7.5 模型注册表（src/models.rs，129 行）</h3>
+  <ul>
+    <li>RwLock 保护 <code>models</code> 列表 + 大小写不敏感 <code>known_names</code> 集合（含别名）。</li>
+    <li><b>静态模式</b>（Default）：infer 协议下的内置快照 —— qwen2.5-0.5b-instruct（loaded）+ llama-7b/13b、mistral-7b（available），保证无核心可查时也能校验与演示。</li>
+    <li><b>动态模式</b>：registry_sync_loop 每 REGISTRY_REFRESH_SECS 拉取 <code>GET {core}/v1/models</code>，10 秒超时保护；失败只告警、保留上一快照（核心短暂不可达不会清空注册表）。llama-server 的 alias 也会进入 known_names，别名请求可通过校验。</li>
+  </ul>
+
+  <h3 id="sec-core">7.6 推理核心双变体（C++ 原型 / llama-server）</h3>
+  <div class="grid2">
+    <div>
+      <h4>C++ 原型（详见 docs/cpp-inference-core.html）</h4>
+      <ul>
+        <li>手写原生 Socket HTTP 服务，547 行零依赖，监听 127.0.0.1:8081。</li>
+        <li>GET /health（编排探测）+ POST /infer（InferRequest → InferResponse）。</li>
+        <li>CPU 回退（toupper 变换）/ CUDA kernel（<code>__CUDACC__</code> 编译钩子）双路径。</li>
+        <li>每连接一线程（detach），无并发上限 —— 原型取舍。</li>
+      </ul>
+    </div>
+    <div>
+      <h4>llama-server（GPU 生产，README §0 路线）</h4>
+      <ul>
+        <li>llama.cpp + CUDA 编译，提供 OpenAI 兼容 <code>/v1/chat/completions</code> 与 <code>/v1/models</code>。</li>
+        <li>单模型模式（--model + --alias）或路由模式（LLAMA_MODELS_DIR，多模型懒加载子进程）。</li>
+        <li>由 start-llama-server.sh 启动：--host 127.0.0.1 --port 8081 --gpu-layers 99 --ctx-size 2048，120s 健康等待。</li>
+        <li>网关以 CORE_PROTOCOL=llama-chat 对接，注册表实时镜像其模型列表。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 id="sec-python">7.7 Python 工具链</h3>
+  <ul>
+    <li><b>demo/client.py</b>：argparse（--model/--input）+ httpx 请求，打印 JSON —— 演示链路的最小闭环。</li>
+    <li><b>benchmark/benchmark.py</b>：固定 payload 循环 10 次，perf_counter 计时，输出单次与平均延迟 —— 配合 /metrics 验证 Worker Pool 伸缩的观测工具。</li>
+    <li><b>tests/test_end_to_end.py</b>：pytest 断言 200 + status ok + output 存在；<code>trust_env=False</code> 屏蔽 CI 代理环境变量干扰（踩坑修复的产物）。</li>
+    <li><b>tools/generate_input.py</b>：输出标准示例 JSON，供手测与文档复用。</li>
+  </ul>
+
+  <h3 id="sec-deploy">7.8 编排与部署</h3>
+  <ul>
+    <li><b>本地开发</b>（start-dev.sh）：缺二进制先跑 build.sh → 启动 C++ core → 轮询 /health（15s 超时）→ 启动网关（PORT 传入）→ 再验 /health → 写 PID 文件；任一步失败执行 rollback（kill 已启进程）并保留日志供排查。stop-dev.sh 按 PID 文件清理。</li>
+    <li><b>GPU 模式</b>（start-llama-server.sh/.ps1）：先杀残留实例避免端口冲突；单模型/路由二选一；CUDA bin 加入 PATH（Windows 版）；120s 等待 llama-server 健康后打印网关启动命令。</li>
+    <li><b>容器化</b>（docker-compose.yml + Dockerfile ×2）：gateway 镜像（rust:1.81 多阶段，ENV BIND_ADDR=0.0.0.0:8080 CORE_URL=http://inference_core:8081）+ core 镜像（gcc:13 → slim）；compose 用 healthcheck + depends_on: service_healthy 保证启动顺序；wget 做健康探测。</li>
+  </ul>
+</section>
+
+<!-- ============ 08 关键设计决策 ============ -->
+<section class="card" id="decisions">
+  <h2><span class="no">08</span>关键设计决策回顾</h2>
+  <table>
+    <tr><th>决策</th><th>理由</th><th>代价 / 后续</th></tr>
+    <tr><td>Rust 网关 + C++ 核心 + Python 工具链</td><td>各语言做最擅长的事：Rust 异步并发、C++ GPU 生态、Python 自动化</td><td>跨语言契约靠 JSON 对齐，需测试守护</td></tr>
+    <tr><td>有界 mpsc 队列 + try_send → 503</td><td>背压前置：队列满立刻拒绝，不拖垮 worker</td><td>客户端需处理 503 重试</td></tr>
+    <tr><td>自适应 Worker Pool（queue_len/2 策略）</td><td>空闲省资源、积压提吞吐，避免固定并发两难</td><td>伸缩粒度粗糙，生产可用 HPA 思路替换</td></tr>
+    <tr><td>CoreProtocol 枚举抽象双后端</td><td>原型与生产共享同一网关代码，零成本切换</td><td>infer 协议随 llama-chat 上线逐渐弃用</td></tr>
+    <tr><td>静态 vs 动态模型注册表</td><td>无核心环境可演示；有核心环境镜像真实模型</td><td>同步是轮询，未来可换推送/事件</td></tr>
+    <tr><td>零依赖 Prometheus 文本指标</td><td>演示阶段避免引入 prometheus crate 复杂度</td><td>生产换正式库或 tracing 导出器</td></tr>
+    <tr><td>环境变量全配置</td><td>同一二进制适配本地/容器/CI</td><td>配置项渐多后可引 config crate</td></tr>
+  </table>
+  <div class="good"><b>总体评价</b>这是一个"分层清晰、契约明确、取舍诚实"的教学级推理网关：Rust 侧展示了 async 调度、背压、自适应并发与可观测性的完整工程套路；C++ 侧展示了 GPU 集成的双路径骨架；Python 侧补齐了演示/基准/测试闭环。真正的 GPU 生产力已由 llama.cpp 生态接管 —— 仓库的价值在于把三套技术栈用清晰的边界拼成一条可运行的链路。</div>
+</section>
+
+<footer>
+  rust-gpu-inference-gateway · docs/architecture-overview.html · 生成于 2026-08-19 · 自包含单文件（离线可打开）<br>
+  数据来源：src/*.rs（共 1281 行）、cpp_inference/*、python/*、scripts/*、deploy/*、docs/architecture.md · api.md
+</footer>
+
+</main>
+
+<button class="btop" id="btop" title="回到顶部">↑</button>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- 轻量语法高亮（复用 C++ 高亮器思路，扩展 Rust/Python 关键字） ---------- */
+  var KW = new Set(("alignas alignof asm auto bool break case catch char class const constexpr continue "
+    + "default delete do double else enum explicit export extern false float for friend goto if inline "
+    + "int long mutable namespace new noexcept nullptr operator private protected public register "
+    + "reinterpret_cast return short signed sizeof static static_cast struct switch template this throw "
+    + "true try typedef typename union unsigned using virtual void volatile while std string vector thread "
+    + "ostream istringstream size_t ssize_t uint16_t int64_t int32_t "
+    + "async await fn impl trait where pub struct enum mod use let mut move dyn ref match if else for in "
+    + "self Self super crate return loop while").split(" "));
+  function isIdent(c) { return /[A-Za-z_$]/.test(c); }
+  function isDigit(c) { return /[0-9]/.test(c); }
+  function highlight(raw) {
+    var s = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    var out = "", i = 0, n = s.length, mode = "code", quote = '"';
+    while (i < n) {
+      var c = s[i];
+      if (mode === "line") { if (c === "\n") { out += "\n</span>"; mode = "code"; } else { out += c; } i++; continue; }
+      if (mode === "block") { if (c === "*" && s[i+1] === "/") { out += "*/</span>"; i += 2; mode = "code"; } else { out += c; i++; } continue; }
+      if (mode === "str") {
+        if (c === "\\") { out += c + (s[i+1] || ""); i += 2; continue; }
+        if (c === quote) { out += c + "</span>"; mode = "code"; i++; continue; }
+        out += c; i++; continue;
+      }
+      if (c === "/" && s[i+1] === "/") { out += '<span class="tok-com">//'; i += 2; mode = "line"; continue; }
+      if (c === "/" && s[i+1] === "*") { out += '<span class="tok-com">/*'; i += 2; mode = "block"; continue; }
+      if (c === '"' || c === "'") { out += '<span class="tok-str">' + c; quote = c; mode = "str"; i++; continue; }
+      if (c === "#") { var j = i; while (j < n && s[j] !== "\n") { j++; } out += '<span class="tok-pp">' + s.slice(i, j) + "</span>"; i = j; continue; }
+      if (isIdent(c)) { var j2 = i; while (j2 < n && (isIdent(s[j2]) || isDigit(s[j2]))) { j2++; } var w = s.slice(i, j2); out += KW.has(w) ? '<span class="tok-kw">' + w + "</span>" : w; i = j2; continue; }
+      if (isDigit(c) || (c === "." && isDigit(s[i+1]))) {
+        var j3 = i; while (j3 < n) { var ch = s[j3];
+          if (/[0-9a-fA-FxX.eE]/.test(ch)) { j3++; continue; }
+          if ((ch === "+" || ch === "-") && /[eE]/.test(s[j3-1] || "")) { j3++; continue; }
+          break; }
+        out += '<span class="tok-num">' + s.slice(i, j3) + "</span>"; i = j3; continue;
+      }
+      out += c; i++;
+    }
+    return out;
+  }
+  document.querySelectorAll("pre code.cxx").forEach(function (el) { el.innerHTML = highlight(el.textContent); });
+
+  /* ---------- 图节点点击 → 跳转解读章节 ---------- */
+  document.querySelectorAll("svg .node").forEach(function (g) {
+    g.addEventListener("click", function () {
+      var sec = g.getAttribute("data-sec");
+      if (sec) { var target = document.getElementById(sec); if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); } }
+    });
+  });
+
+  /* ---------- 回到顶部 ---------- */
+  var btop = document.getElementById("btop");
+  btop.addEventListener("click", function () { window.scrollTo({ top: 0, behavior: "smooth" }); });
+  window.addEventListener("scroll", function () { btop.style.display = window.scrollY > 400 ? "block" : "none"; });
+  btop.style.display = "none";
+})();
+</script>
+
+</body>
+</html>
