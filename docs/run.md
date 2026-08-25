@@ -341,9 +341,7 @@ The C++ core is not yet a production LLM runtime, but it is a real C++ service w
 
 The parts still planned for later versions are:
 
-- Expanded metrics and distributed tracing (spans across gateway and core, request-header correlation)
 - request batching
 - ONNX Runtime / TensorRT integration as alternative core backends
 - gRPC API and protobuf definitions
-- Kubernetes deployment examples (Deployment / Service / HPA)
 - Solana/zk proof-of-concept integration
