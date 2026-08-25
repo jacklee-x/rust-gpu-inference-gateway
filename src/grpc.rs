@@ -84,6 +84,7 @@ impl GrpcInferenceService {
 }
 
 #[tonic::async_trait]
+#[allow(clippy::result_large_err)]
 impl InferenceService for GrpcInferenceService {
     async fn infer(
         &self,
