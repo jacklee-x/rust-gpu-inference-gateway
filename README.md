@@ -9,7 +9,7 @@ A Rust-based inference gateway with a C++/CUDA GPU inference core and Python too
 - C++ inference core for GPU-backed model execution
 - Prometheus-compatible metrics endpoint (`GET /metrics`)
 - Model registry and discovery endpoint (`GET /models`), dynamically synced with the inference core in `llama-chat` mode (multi-model router support)
-- Traceable per-request `request_id` (UUID) stamped by the gateway
+- Traceable per-request `request_id` (UUID): the gateway honors an incoming `x-request-id` header when it carries a valid UUID and echoes the final id back on every response
 - Environment-variable based configuration (`CORE_URL`, `CORE_PROTOCOL` (`infer` | `llama-chat`), `MIN_CONCURRENCY`, `MAX_CONCURRENCY`, `QUEUE_CAPACITY`, `REQUEST_TIMEOUT_SECS`, ...)
 - Adaptive worker pool: concurrency grows from `MIN_CONCURRENCY` to `MAX_CONCURRENCY` with the request queue depth and collapses when idle (visible in `/metrics` as `inference_worker_pool_size`)
 - Python tooling for demo clients, model preparation, and benchmark scripts
@@ -210,12 +210,12 @@ The API is designed to be easy to call from Python clients and to return clear i
 - [x] GPU inference support with a real CUDA kernel / model loader (llama.cpp + CUDA, `CORE_PROTOCOL=llama-chat`)
 - [x] Model management: `GET /models` and in-memory model registry
 - [x] Prometheus-formatted metrics endpoint
-- [ ] Expand metrics and tracing (tracing layer, request headers, ...)
+- [x] Expand metrics and tracing (opt-in OTLP export, W3C trace-context propagation, `x-request-id` passthrough)
 
 ### Phase 3
 - [x] Add multi-model support (llama-server router mode, dynamic model registry synced from the core; scaling still open)
 - [ ] Add Kubernetes deployment examples
-- [ ] gRPC API and protobuf definitions
+- [x] gRPC API and protobuf definitions (`proto/inference.proto` + tonic service on `:50051`)
 - [ ] Solana/zk proof-of-concept integration
 
 ## Contributing

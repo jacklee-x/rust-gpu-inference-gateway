@@ -1,7 +1,9 @@
+#![allow(clippy::result_large_err)] // tonic::Status is large; generated trait methods return it.
+
 use axum::{
     extract::Json,
-    http::StatusCode,
-    response::IntoResponse,
+    http::{HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Router,
 };
@@ -15,12 +17,16 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::timeout,
 };
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{debug, error, field, info, info_span, warn, Instrument};
+use tracing_subscriber::layer::{Layer as _, SubscriberExt};
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+mod grpc;
 mod metrics;
 mod models;
+mod telemetry;
 mod worker_pool;
 
 use metrics::{Metrics, Outcome};
@@ -102,6 +108,8 @@ struct Job {
 struct AppState {
     job_sender: mpsc::Sender<Job>,
     request_timeout_secs: u64,
+    // Wire protocol used towards the inference core; recorded on spans.
+    core_protocol: CoreProtocol,
     metrics: Arc<Metrics>,
     model_registry: Arc<ModelRegistry>,
 }
@@ -110,6 +118,7 @@ struct AppState {
 // so the same binary works locally, in Docker Compose, and in CI.
 struct Config {
     bind_addr: SocketAddr,
+    grpc_addr: SocketAddr,
     core_url: String,
     core_protocol: CoreProtocol,
     max_concurrency: usize,
@@ -174,6 +183,12 @@ impl Config {
             std::process::exit(1);
         });
 
+        let grpc_addr = std::env::var("GRPC_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+        let grpc_addr: SocketAddr = grpc_addr.parse().unwrap_or_else(|_| {
+            eprintln!("Invalid GRPC_ADDR: {}", grpc_addr);
+            std::process::exit(1);
+        });
+
         let core_url =
             std::env::var("CORE_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".to_string());
 
@@ -187,6 +202,7 @@ impl Config {
 
         Config {
             bind_addr,
+            grpc_addr,
             core_url,
             core_protocol,
             max_concurrency,
@@ -229,9 +245,29 @@ fn parse_env_u64(name: &str, default: u64) -> u64 {
 // #[tokio::main] to provide an async runtime for the server.
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    // Stdout logging stays on unconditionally; the OpenTelemetry layer is
+    // added only when OTEL_EXPORTER_OTLP_ENDPOINT is configured.
+    let (otel_layer, telemetry_guard) = telemetry::init_otel();
+    match otel_layer {
+        // Each branch builds its own fmt layer: tracing-subscriber layers
+        // are generic over the subscriber they attach to, so the two
+        // compositions need distinct concrete types.
+        // The OTel layer must attach directly to the Registry (its
+        // concrete type pins the inner subscriber), so it goes on first.
+        Some(layer) => {
+            let fmt_layer =
+                tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env());
+            tracing_subscriber::registry()
+                .with(layer)
+                .with(fmt_layer)
+                .init();
+        }
+        None => {
+            let fmt_layer =
+                tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env());
+            tracing_subscriber::registry().with(fmt_layer).init();
+        }
+    }
 
     let config = Config::from_env();
 
@@ -284,52 +320,75 @@ async fn main() {
         ));
     }
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         job_sender,
         request_timeout_secs: config.request_timeout_secs,
+        core_protocol: config.core_protocol,
         metrics,
         model_registry,
-    };
+    });
 
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
         .route("/models", get(models_handler))
         .route("/infer", post(infer_handler))
-        .layer(Extension(Arc::new(state)));
+        .layer(Extension(state.clone()));
 
-    let addr = config.bind_addr;
+    let http_addr = config.bind_addr;
+    let grpc_addr = config.grpc_addr;
     info!(
-        %addr,
+        %http_addr,
+        %grpc_addr,
         core_url = %config.core_url,
         core_protocol = config.core_protocol.as_str(),
         "starting inference gateway"
     );
 
-    let listener = match TcpListener::bind(addr).await {
+    let http_listener = match TcpListener::bind(http_addr).await {
         Ok(listener) => listener,
         Err(err) => {
-            // More friendly error message than panic
             if err.kind() == std::io::ErrorKind::AddrInUse {
                 eprintln!(
                     "Failed to bind to {}: address already in use (is another instance running?).",
-                    addr
+                    http_addr
                 );
                 eprintln!(
                     "On Windows: run `Get-NetTCPConnection -LocalPort {}` or use Task Manager to stop the process. On Linux: `ss -ltnp | grep {}`.",
-                    addr.port(),
-                    addr.port()
+                    http_addr.port(),
+                    http_addr.port()
                 );
             } else {
-                eprintln!("Failed to bind to {}: {}", addr, err);
+                eprintln!("Failed to bind to {}: {}", http_addr, err);
             }
             std::process::exit(1);
         }
     };
 
-    if let Err(err) = axum::serve(listener, app).await {
-        error!("server error: {}", err);
-        std::process::exit(1);
+    // gRPC service shares the same state (job queue, metrics, model registry)
+    // as the HTTP endpoints. Both servers run concurrently on separate ports.
+    let grpc_service = grpc::GrpcInferenceService::new(state).into_server();
+
+    tokio::select! {
+        result = axum::serve(http_listener, app) => {
+            if let Err(err) = result {
+                error!("http server error: {}", err);
+                std::process::exit(1);
+            }
+        }
+        result = tonic::transport::Server::builder()
+            .add_service(grpc_service)
+            .serve(grpc_addr) => {
+            if let Err(err) = result {
+                error!("grpc server error: {}", err);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Flush any spans still buffered by the batch exporter before exit.
+    if let Some(guard) = telemetry_guard {
+        guard.shutdown();
     }
 }
 
@@ -408,33 +467,69 @@ async fn models_handler(Extension(state): Extension<Arc<AppState>>) -> impl Into
     )
 }
 
+// Build a JSON response and attach the correlation id as an
+// `x-request-id` response header when one is known.
+fn json_response(
+    status: StatusCode,
+    body: serde_json::Value,
+    request_id: Option<&str>,
+) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    if let Some(id) = request_id {
+        match HeaderValue::from_str(id) {
+            Ok(value) => {
+                response.headers_mut().insert("x-request-id", value);
+            }
+            Err(_) => debug!(request_id = %id, "request_id not usable as header value"),
+        }
+    }
+    response
+}
+
 // HTTP handler for POST /infer
 // Responsibilities:
 // 1. Validate the request against the model registry
-// 2. Assign a traceable request_id and stamp it on the outgoing payload
+// 2. Resolve a traceable request_id: honor an incoming `x-request-id`
+//    header when it carries a valid UUID (multi-hop clients correlate
+//    across services), otherwise stamp a fresh UUID v4 — and always echo
+//    the final id back via the `x-request-id` response header on top of
+//    the existing JSON body field
 // 3. Create a oneshot channel for the worker to send back the result
 // 4. Try to enqueue the Job. If the bounded queue is full, return 503 quickly
 // 5. Wait for the worker's response with a timeout; map outcomes to HTTP codes
-// 6. Record Prometheus metrics for every accepted request
+// 6. Record Prometheus metrics and tracing spans for every accepted request
 async fn infer_handler(
     Extension(state): Extension<Arc<AppState>>,
+    headers: HeaderMap,
     Json(mut payload): Json<InferRequest>,
-) -> impl IntoResponse {
+) -> Response {
     if !state.model_registry.contains(&payload.model) {
         state.metrics.note_validation_error();
         warn!(model = %payload.model, "unknown model in request");
-        return (
+        return json_response(
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
+            serde_json::json!({
                 "status": "error",
                 "message": format!("unknown model '{}'", payload.model)
-            })),
+            }),
+            None,
         );
     }
 
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| Uuid::parse_str(value).ok())
+        .map(|uuid| uuid.to_string())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     payload.request_id = Some(request_id.clone());
-    let span = info_span!("infer_request", request_id = %request_id, model = %payload.model);
+    let span = info_span!(
+        "infer_request",
+        request_id = %request_id,
+        model = %payload.model,
+        protocol = state.core_protocol.as_str(),
+        outcome = field::Empty,
+    );
     let _enter = span.enter();
     info!("inference request received");
 
@@ -447,9 +542,11 @@ async fn infer_handler(
     if state.job_sender.try_send(job).is_err() {
         state.metrics.note_queue_full();
         warn!(%request_id, "queue full, rejecting request");
-        return (
+        span.record("outcome", "queue_full");
+        return json_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"status": "queue_full"})),
+            serde_json::json!({"status": "queue_full"}),
+            Some(&request_id),
         );
     }
 
@@ -464,6 +561,7 @@ async fn infer_handler(
         Ok(Ok(Ok(mut infer_resp))) => {
             infer_resp.request_id = request_id.clone();
             state.metrics.finish_request(Outcome::Ok, elapsed_ms);
+            span.record("outcome", "ok");
             info!(
                 %request_id,
                 core_latency_ms = %infer_resp.usage.latency_ms,
@@ -471,32 +569,38 @@ async fn infer_handler(
             );
             let value = serde_json::to_value(infer_resp)
                 .unwrap_or(serde_json::json!({"status":"ok","output":"serialization_error"}));
-            (StatusCode::OK, Json(value))
+            json_response(StatusCode::OK, value, Some(&request_id))
         }
         Ok(Ok(Err(err_msg))) => {
             state.metrics.finish_request(Outcome::Error, elapsed_ms);
+            span.record("outcome", "error");
             error!(%request_id, %err_msg, "inference failed");
-            (
+            json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"status":"error","message": err_msg})),
+                serde_json::json!({"status":"error","message": err_msg}),
+                Some(&request_id),
             )
         }
         Ok(Err(_)) => {
             state.metrics.finish_request(Outcome::Error, elapsed_ms);
+            span.record("outcome", "error");
             error!(%request_id, "worker task cancelled");
-            (
+            json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"status":"error","message": "worker task cancelled"})),
+                serde_json::json!({"status":"error","message": "worker task cancelled"}),
+                Some(&request_id),
             )
         }
         Err(_) => {
             state
                 .metrics
                 .finish_request(Outcome::Timeout, timeout_dur.as_millis() as u64);
+            span.record("outcome", "timeout");
             warn!(%request_id, timeout_secs = %state.request_timeout_secs, "inference timed out");
-            (
+            json_response(
                 StatusCode::GATEWAY_TIMEOUT,
-                Json(serde_json::json!({"status":"timeout"})),
+                serde_json::json!({"status":"timeout"}),
+                Some(&request_id),
             )
         }
     }
@@ -517,18 +621,41 @@ async fn call_inference_core(
     protocol: CoreProtocol,
     req: InferRequest,
 ) -> JobResult {
-    match protocol {
-        CoreProtocol::Infer => call_infer_protocol(client, core_url, req).await,
-        CoreProtocol::LlamaChat => call_llama_chat_protocol(client, core_url, req).await,
-    }
+    let started = Instant::now();
+    let span = info_span!(
+        "core_call",
+        protocol = protocol.as_str(),
+        model = %req.model,
+        core_latency_ms = field::Empty,
+    );
+
+    let result = match protocol {
+        CoreProtocol::Infer => {
+            call_infer_protocol(client, core_url, req)
+                .instrument(span.clone())
+                .await
+        }
+        CoreProtocol::LlamaChat => {
+            call_llama_chat_protocol(client, core_url, req)
+                .instrument(span.clone())
+                .await
+        }
+    };
+
+    span.record("core_latency_ms", started.elapsed().as_millis() as u64);
+    result
 }
 
 // Legacy custom wire format: POST {core}/infer with the full
 // InferRequest JSON, expecting an InferResponse JSON in return.
 async fn call_infer_protocol(client: &Client, core_url: &str, req: InferRequest) -> JobResult {
     let infer_url = format!("{}/infer", core_url.trim_end_matches('/'));
+    // Continue the active W3C trace into the core call.
+    let mut headers = reqwest::header::HeaderMap::new();
+    telemetry::inject_trace_context(&mut headers);
     let response = client
         .post(&infer_url)
+        .headers(headers)
         .json(&req)
         .send()
         .await
@@ -571,8 +698,11 @@ async fn call_llama_chat_protocol(client: &Client, core_url: &str, req: InferReq
         }
     }
 
+    let mut headers = reqwest::header::HeaderMap::new();
+    telemetry::inject_trace_context(&mut headers);
     let response = client
         .post(&chat_url)
+        .headers(headers)
         .json(&body)
         .send()
         .await
