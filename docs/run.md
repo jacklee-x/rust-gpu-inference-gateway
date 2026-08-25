@@ -343,4 +343,3 @@ The parts still planned for later versions are:
 - GPU model loading and execution with a true CUDA kernel
 - ONNX Runtime / TensorRT integration
 - request batching and dynamic model registry (backed by storage or the core)
-- gRPC API and Kubernetes deployment examples

@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package inference;
+
+// gRPC service mirroring the existing HTTP API.
+//
+// The gateway runs this alongside axum on a separate port (default 50051).
+// All three RPCs share the same job queue, adaptive worker pool, metrics
+// and model registry as the HTTP endpoints.
+
+service InferenceService {
+  // Run inference on a model (mirrors POST /infer).
+  rpc Infer(InferRequest) returns (InferResponse);
+
+  // Health check (mirrors GET /health).
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // List available models (mirrors GET /models).
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+}
+
+message InferRequest {
+  string model = 1;
+  string input = 2;
+  optional InferOptions options = 3;
+  string request_id = 4;
+}
+
+message InferOptions {
+  optional uint32 max_tokens = 1;
+  optional float temperature = 2;
+  optional float top_p = 3;
+}
+
+message InferResponse {
+  string request_id = 1;
+  string model = 2;
+  string output = 3;
+  Usage usage = 4;
+  string status = 5;
+}
+
+message Usage {
+  uint64 latency_ms = 1;
+  uint32 tokens = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+  string name = 1;
+  string status = 2;
+  string device = 3;
+  string backend = 4;
+}
