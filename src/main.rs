@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // tonic::Status is large; generated trait methods return it.
+
 use axum::{
     extract::Json,
     http::StatusCode,
