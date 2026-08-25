@@ -320,7 +320,20 @@ curl http://127.0.0.1:8080/models
 
 `POST /infer` validates the `model` field against the registry and returns `400 {"status":"error","message":"unknown model '...'"}` for unknown names.
 
-## 8. What this version does
+### Tracing (optional OpenTelemetry export)
+
+By default the gateway logs to stdout only. Set `OTEL_EXPORTER_OTLP_ENDPOINT`
+(for example `http://localhost:4318`) to additionally export spans over
+OTLP/HTTP protobuf to `{endpoint}/v1/traces`. Each `/infer` request produces
+an `infer_request` span (`model`, `protocol`, `outcome`) containing a
+`core_call` child span with `core_latency_ms`, and outgoing core calls carry
+W3C `traceparent` headers so traces can span gateway -> core.
+
+Correlation ids: send your own `x-request-id` header (a valid UUID) to reuse
+it as the `request_id` across services; the gateway always echoes the final
+id back in the `x-request-id` response header.
+
+## 7. What this version does
 
 At present, the system is a working end-to-end proof of concept. It supports:
 
@@ -341,7 +354,4 @@ The C++ core is not yet a production LLM runtime, but it is a real C++ service w
 
 The parts still planned for later versions are:
 
-- request batching
-- ONNX Runtime / TensorRT integration as alternative core backends
-- gRPC API and protobuf definitions
 - Solana/zk proof-of-concept integration

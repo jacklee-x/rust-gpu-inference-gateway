@@ -3,8 +3,7 @@ target/
 **/target/
 *.rs.bk
 
-# Lockfiles are ignored for library-style repos; keep for binaries if desired
-Cargo.lock
+# Lockfiles: tracked for this binary crate (best practice per Cargo book)
 
 # OS noise
 .DS_Store
