@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)] // tonic::Status is large; generated trait methods return it.
+
 use axum::{
     extract::Json,
     http::StatusCode,
@@ -19,6 +21,7 @@ use tracing::{debug, error, info, info_span, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+mod grpc;
 mod metrics;
 mod models;
 mod worker_pool;
@@ -110,6 +113,7 @@ struct AppState {
 // so the same binary works locally, in Docker Compose, and in CI.
 struct Config {
     bind_addr: SocketAddr,
+    grpc_addr: SocketAddr,
     core_url: String,
     core_protocol: CoreProtocol,
     max_concurrency: usize,
@@ -174,6 +178,12 @@ impl Config {
             std::process::exit(1);
         });
 
+        let grpc_addr = std::env::var("GRPC_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string());
+        let grpc_addr: SocketAddr = grpc_addr.parse().unwrap_or_else(|_| {
+            eprintln!("Invalid GRPC_ADDR: {}", grpc_addr);
+            std::process::exit(1);
+        });
+
         let core_url =
             std::env::var("CORE_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".to_string());
 
@@ -187,6 +197,7 @@ impl Config {
 
         Config {
             bind_addr,
+            grpc_addr,
             core_url,
             core_protocol,
             max_concurrency,
@@ -284,52 +295,69 @@ async fn main() {
         ));
     }
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         job_sender,
         request_timeout_secs: config.request_timeout_secs,
         metrics,
         model_registry,
-    };
+    });
 
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
         .route("/models", get(models_handler))
         .route("/infer", post(infer_handler))
-        .layer(Extension(Arc::new(state)));
+        .layer(Extension(state.clone()));
 
-    let addr = config.bind_addr;
+    let http_addr = config.bind_addr;
+    let grpc_addr = config.grpc_addr;
     info!(
-        %addr,
+        %http_addr,
+        %grpc_addr,
         core_url = %config.core_url,
         core_protocol = config.core_protocol.as_str(),
         "starting inference gateway"
     );
 
-    let listener = match TcpListener::bind(addr).await {
+    let http_listener = match TcpListener::bind(http_addr).await {
         Ok(listener) => listener,
         Err(err) => {
-            // More friendly error message than panic
             if err.kind() == std::io::ErrorKind::AddrInUse {
                 eprintln!(
                     "Failed to bind to {}: address already in use (is another instance running?).",
-                    addr
+                    http_addr
                 );
                 eprintln!(
                     "On Windows: run `Get-NetTCPConnection -LocalPort {}` or use Task Manager to stop the process. On Linux: `ss -ltnp | grep {}`.",
-                    addr.port(),
-                    addr.port()
+                    http_addr.port(),
+                    http_addr.port()
                 );
             } else {
-                eprintln!("Failed to bind to {}: {}", addr, err);
+                eprintln!("Failed to bind to {}: {}", http_addr, err);
             }
             std::process::exit(1);
         }
     };
 
-    if let Err(err) = axum::serve(listener, app).await {
-        error!("server error: {}", err);
-        std::process::exit(1);
+    // gRPC service shares the same state (job queue, metrics, model registry)
+    // as the HTTP endpoints. Both servers run concurrently on separate ports.
+    let grpc_service = grpc::GrpcInferenceService::new(state).into_server();
+
+    tokio::select! {
+        result = axum::serve(http_listener, app) => {
+            if let Err(err) = result {
+                error!("http server error: {}", err);
+                std::process::exit(1);
+            }
+        }
+        result = tonic::transport::Server::builder()
+            .add_service(grpc_service)
+            .serve(grpc_addr) => {
+            if let Err(err) = result {
+                error!("grpc server error: {}", err);
+                std::process::exit(1);
+            }
+        }
     }
 }
 

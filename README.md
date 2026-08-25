@@ -214,7 +214,7 @@ The API is designed to be easy to call from Python clients and to return clear i
 ### Phase 3
 - [x] Add multi-model support (llama-server router mode, dynamic model registry synced from the core; scaling still open)
 - [ ] Add Kubernetes deployment examples
-- [ ] gRPC API and protobuf definitions
+- [x] gRPC API and protobuf definitions (`proto/inference.proto` + tonic service on `:50051`)
 - [ ] Solana/zk proof-of-concept integration
 
 ## Contributing
