@@ -25,10 +25,10 @@ fn find_protoc() -> Option<PathBuf> {
         .map(PathBuf::from)?;
 
     const RELATIVE: &[&str] = &[
-        ".local/bin/bin/protoc.exe",      // Windows, pip --user
-        ".local/bin/protoc",              // Linux/macOS, pip --user
-        "anaconda3/bin/protoc",           // anaconda (Linux/macOS)
-        "Anaconda3/Library/bin/protoc.exe", // anaconda (Windows)
+        ".local/bin/bin/protoc.exe",         // Windows, pip --user
+        ".local/bin/protoc",                 // Linux/macOS, pip --user
+        "anaconda3/bin/protoc",              // anaconda (Linux/macOS)
+        "Anaconda3/Library/bin/protoc.exe",  // anaconda (Windows)
         "Miniconda3/Library/bin/protoc.exe", // miniconda (Windows)
     ];
 
