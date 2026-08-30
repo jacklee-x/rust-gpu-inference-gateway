@@ -21,7 +21,8 @@ class MockInferenceHandler(BaseHTTPRequestHandler):
 
         input_text = payload.get("input", "")
         model_name = payload.get("model", "unknown")
-        max_tokens = payload.get("options", {}).get("max_tokens", 0)
+        options = payload.get("options") or {}
+        max_tokens = options.get("max_tokens", 0)
 
         response = {
             "request_id": "mock-" + model_name,
